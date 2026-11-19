@@ -8,8 +8,6 @@
  * - 所有 V4 帧经 `encodeV4TopicFrames`（wireVersion=3 + 物理字节计量）下发。
  */
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import type {
   ModelSelection,
   SessionLifecycleSnapshot,
@@ -21,18 +19,14 @@ import {
   type CommandAck,
   type CommandEnvelope,
   type CommandPayloadMap,
-  type ConversationTopicFrame,
   type ConversationTopicWireCandidate,
   type SessionSummary,
   type SubscribeAck,
+  type V4ConversationFileChangesResult,
   type V4ConversationRowsRangeResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import type { PiModelInfo, PiRpcEvent, PiRpcExitInfo } from "#src/pi-runtime/contract.js";
-import {
-  getSupportedThinkingLevels,
-  pickDefaultThinkingLevel,
-} from "#src/pi-runtime/domain/piModelCapability.js";
 import {
   PiEventProjector,
   type ProjectionCommit,
@@ -44,13 +38,21 @@ import {
   createInitialSessionConfig,
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
-import { discoverPi, formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
+import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import {
-  encodeV4TopicFrames,
+  emitConversationDeltaFrames,
+  emitConversationSnapshotFrames,
   type TopicSubscriptionState,
 } from "#src/pi-runtime/adapters/piFrameEncoder.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
-import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
+import {
+  hydratePiClientInitialState,
+  resolveRequestedSelectionSwitch,
+  spawnConfiguredPiClient,
+  syncPiModelAndThoughtToClient,
+  type ResolvedModelTarget,
+} from "#src/pi-runtime/adapters/piModelSync.js";
+import type { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
 import {
   dispatchPiAuxCommand,
   dispatchPiSendText,
@@ -104,8 +106,10 @@ export class PiSessionController {
   private clientEventUnsub: (() => void) | null = null;
   private clientExitUnsub: (() => void) | null = null;
   private spawnPromise: Promise<PiRpcClient> | null = null;
+  private activeClientModel: PiModelInfo | undefined;
   private activeClientModelKey = "";
   private activeClientThinking = "";
+  private piSessionFile: string | undefined;
   private disposed = false;
 
   constructor(options: PiSessionControllerOptions) {
@@ -141,6 +145,7 @@ export class PiSessionController {
     );
     this.projector = new PiEventProjector({
       sessionId: this.sessionId,
+      workspacePath: this.workspacePath,
       logEpoch: `pi-${randomUUID()}`,
       attemptId: `init-${randomUUID()}`,
       config,
@@ -203,6 +208,10 @@ export class PiSessionController {
 
   findTurnForCommand(commandId: string) {
     return this.projector.findTurnForCommand(commandId);
+  }
+
+  getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
+    return this.projector.getTurnFileChanges(target);
   }
 
   subscribe(subscriptionId: string): SubscribeAck {
@@ -300,7 +309,7 @@ export class PiSessionController {
       getLiveClient: () => (this.client?.alive ? this.client : null),
       ensureClient: () => this.ensureClient(),
       broadcastCommit: (commit) => this.broadcastCommit(commit),
-      syncModelConfigToClient: (client) => this.syncModelConfigToClient(client),
+      applyLiveModelSwitch: (target) => this.applyLiveModelSwitch(target),
       startFreshTurn: (input) => this.startFreshTurn(input),
       handleDeleteSession: (commandId) => this.handleDeleteSession(commandId),
     };
@@ -328,10 +337,10 @@ export class PiSessionController {
     );
 
     try {
-      const client = await this.ensureClient();
-      await this.syncModelConfigToClient(client);
+      const initialClient = await this.ensureClient();
+      const activeClient = await this.syncModelConfigToClient(initialClient);
       const seqBefore = this.projector.getAgentLifecycleSeq();
-      const ack = await client.prompt(input.text);
+      const ack = await activeClient.prompt(input.text);
       if (ack?.disposition === "handled") {
         this.broadcastCommit(this.projector.completeHandledPrompt(Date.now()));
       } else {
@@ -381,35 +390,29 @@ export class PiSessionController {
     return createCommandAck({ commandId, status: "accepted", revisionAtDecision: rev });
   }
 
-  private async ensureClient(): Promise<PiRpcClient> {
+  private async ensureClient(override?: {
+    provider?: string | undefined;
+    model?: string | undefined;
+    thought?: string | undefined;
+  }): Promise<PiRpcClient> {
     if (this.client?.alive) return this.client;
     if (this.spawnPromise) return this.spawnPromise;
     if (this.disposed) throw new Error("Session disposed before starting Pi");
 
     // 先同步占位 spawnPromise 再 await discoverPi，防止并发调用或关闭期间 discoverPi 竞态泄漏双进程。
     const promise = (async () => {
-      const launch = await discoverPi({
+      const config = this.projector.getSnapshot().config;
+      const client = await spawnConfiguredPiClient({
+        cwd: this.cwd,
         env: this.env,
         platform: this.platform,
         managedRuntimeDir: this.managedRuntimeDir,
+        sessionFile: this.piSessionFile,
+        provider: override?.provider ?? config.provider,
+        model: override?.model ?? config.model,
+        thought: override?.thought ?? config.thought,
+        isDisposed: () => this.disposed,
       });
-      if (this.disposed) throw new Error("Session disposed while discovering Pi");
-      if (!launch) throw new Error("Pi CLI (pi) not found on PATH");
-
-      const config = this.projector.getSnapshot().config;
-      const effectiveCwd = this.cwd && existsSync(this.cwd) ? this.cwd : tmpdir();
-      const client = await PiRpcClient.spawn({
-        launch,
-        cwd: effectiveCwd,
-        env: this.env,
-        ...(config.provider ? { provider: config.provider } : {}),
-        ...(config.model ? { model: config.model } : {}),
-        ...(config.thought ? { thinkingLevel: config.thought } : {}),
-      });
-      if (this.disposed) {
-        await client.closeAndWait(2_000).catch(() => {});
-        throw new Error("Session disposed while starting Pi");
-      }
       this.attachClient(client);
       await this.hydrateFromClientState(client);
       return client;
@@ -441,41 +444,18 @@ export class PiSessionController {
 
   private async hydrateFromClientState(client: PiRpcClient): Promise<void> {
     try {
-      const [state, modelsResult] = await Promise.all([
-        client.getState(),
-        client.getAvailableModels().catch(() => ({ models: [] as PiModelInfo[] })),
-      ]);
-      const models = Array.isArray(modelsResult.models) ? modelsResult.models : [];
-      if (models.length > 0) {
-        this.catalog.seedFromLiveSession({
-          models,
-          defaultModel: state.model ?? models[0],
-          defaultThinkingLevel: state.thinkingLevel,
-        });
-      }
-      if (state.model) {
-        this.activeClientModelKey = `${state.model.provider}/${state.model.id}`;
-        this.projector.setContextWindowMax(state.model.contextWindow);
-      }
-      this.activeClientThinking = state.thinkingLevel || "";
-      const prev = this.projector.getSnapshot().config;
-      if (!prev.provider && state.model) {
-        const thoughtLevels = getSupportedThinkingLevels(state.model);
-        const thought = pickDefaultThinkingLevel(state.model, state.thinkingLevel);
-        this.broadcastCommit(
-          this.projector.applyConfigUpdate({
-            ...prev,
-            provider: state.model.provider,
-            model: state.model.id,
-            thought,
-            thoughtLevels,
-            modelSelection: {
-              providerId: state.model.provider,
-              modelId: state.model.id,
-              options: { reasoningLevel: thought },
-            },
-          }),
-        );
+      const hydrated = await hydratePiClientInitialState(
+        client,
+        this.catalog,
+        this.projector.getSnapshot().config,
+      );
+      if (hydrated.sessionFile) this.piSessionFile = hydrated.sessionFile;
+      if (hydrated.model) this.activeClientModel = hydrated.model;
+      if (hydrated.modelKey) this.activeClientModelKey = hydrated.modelKey;
+      this.activeClientThinking = hydrated.thinkingLevel;
+      this.projector.setContextWindowMax(hydrated.contextWindow);
+      if (hydrated.initialConfigPatch) {
+        this.broadcastCommit(this.projector.applyConfigUpdate(hydrated.initialConfigPatch));
       }
     } catch (error) {
       logger.warn(undefined, `Pi 初始状态同步失败: ${formatRedactedPiError(error)}`);
@@ -483,56 +463,96 @@ export class PiSessionController {
   }
 
   private applyRequestedModelSelection(selection: ModelSelection | undefined): void {
-    if (!selection) return;
-    const prev = this.projector.getSnapshot().config;
-    const nextThought = selection.options?.reasoningLevel ?? prev.thought;
-    if (
-      prev.provider === selection.providerId &&
-      prev.model === selection.modelId &&
-      prev.thought === nextThought
-    ) {
-      return;
-    }
-    const matched = this.catalog
-      .getSnapshot()
-      .models.find((m) => m.provider === selection.providerId && m.id === selection.modelId);
-    this.projector.setContextWindowMax(matched?.contextWindow);
+    const resolved = resolveRequestedSelectionSwitch(
+      this.catalog,
+      this.projector.getSnapshot().config,
+      selection,
+    );
+    if (!resolved) return;
+    this.projector.setContextWindowMax(resolved.contextWindow);
     this.broadcastCommit(
-      this.projector.applyConfigUpdate({
-        ...prev,
-        provider: selection.providerId,
-        model: selection.modelId,
-        thought: nextThought,
-        thoughtLevels: matched ? getSupportedThinkingLevels(matched) : prev.thoughtLevels,
-        modelSelection: {
-          providerId: selection.providerId,
-          modelId: selection.modelId,
-          ...(nextThought ? { options: { reasoningLevel: nextThought } } : {}),
-        },
+      this.projector.applyModelSwitch({
+        provider: resolved.provider,
+        model: resolved.model,
+        thought: resolved.thought,
+        thoughtLevels: resolved.thoughtLevels,
+        nowMs: Date.now(),
       }),
     );
   }
 
-  private async syncModelConfigToClient(client: PiRpcClient): Promise<void> {
+  private async applyLiveModelSwitch(
+    target: ResolvedModelTarget,
+    allowIdleRespawn = false,
+  ): Promise<{
+    readonly client: PiRpcClient;
+    readonly thought: string;
+    readonly thoughtLevels: readonly string[];
+    readonly contextWindow?: number | undefined;
+  }> {
+    const client = this.client?.alive ? this.client : await this.ensureClient(target);
+    const outcome = await syncPiModelAndThoughtToClient({
+      client,
+      target,
+      activeClientModelKey: this.activeClientModelKey,
+      activeClientThinking: this.activeClientThinking,
+      isRunning:
+        !allowIdleRespawn && isSessionRunningPhase(this.projector.getSnapshot().control.phase),
+      respawnIdleClient: async (nextTarget) => {
+        await this.closeClientAndWait();
+        this.activeClientModel = undefined;
+        this.activeClientModelKey = "";
+        this.activeClientThinking = "";
+        const fresh = await this.ensureClient(nextTarget);
+        return {
+          client: fresh,
+          model: this.activeClientModel,
+          modelKey: this.activeClientModelKey,
+          thinkingLevel: this.activeClientThinking,
+        };
+      },
+    });
+    if (outcome.model) this.activeClientModel = outcome.model;
+    this.activeClientModelKey = outcome.modelKey;
+    this.activeClientThinking = outcome.thinkingLevel;
+    this.projector.setContextWindowMax(outcome.contextWindow);
+    return {
+      client: outcome.client,
+      thought: outcome.thinkingLevel,
+      thoughtLevels: outcome.thoughtLevels,
+      contextWindow: outcome.contextWindow,
+    };
+  }
+
+  private async syncModelConfigToClient(client: PiRpcClient): Promise<PiRpcClient> {
     const config = this.projector.getSnapshot().config;
-    if (config.provider && config.model) {
-      const targetKey = `${config.provider}/${config.model}`;
-      if (targetKey !== this.activeClientModelKey) {
-        const updated = await client.setModel(config.provider, config.model).catch(() => null);
-        if (updated) {
-          this.activeClientModelKey = targetKey;
-          this.projector.setContextWindowMax(updated.contextWindow);
-        }
+    if (!config.provider || !config.model) return client;
+    try {
+      // 回合 prompt 尚未下发给 Pi，子进程仍空闲，允许 /model not found/i 时空闲重启一次。
+      const synced = await this.applyLiveModelSwitch(
+        {
+          provider: config.provider,
+          model: config.model,
+          thought: config.thought,
+          thoughtLevels: config.thoughtLevels,
+        },
+        true,
+      );
+      return synced.client;
+    } catch (error: unknown) {
+      if (client.alive) {
+        logger.warn(undefined, `Pi 回合前同步模型失败: ${formatRedactedPiError(error)}`);
       }
-    }
-    if (config.thought && config.thought !== this.activeClientThinking) {
-      await client.setThinkingLevel(config.thought).catch(() => {});
-      this.activeClientThinking = config.thought;
+      return this.client?.alive ? this.client : client;
     }
   }
 
   private handlePiEvent(event: PiRpcEvent): void {
     if (this.disposed) return;
+    if (event.type === "thinking_level_changed") {
+      const trimmed = event.level.trim();
+      if (trimmed) this.activeClientThinking = trimmed;
+    }
     this.broadcastCommit(this.projector.applyPiEvent(event, Date.now()));
   }
 
@@ -566,36 +586,17 @@ export class PiSessionController {
     sub: TopicSubscriptionState,
     deliveryKind: "initial" | "recovery",
   ): void {
-    const snapshot = this.projector.getSnapshot();
-    const logicalFrame: ConversationTopicFrame = {
-      topic: sub.topic,
-      subscriptionId: sub.subscriptionId,
-      fromSeq: 0,
-      toSeq: snapshot.seq,
-      sentAt: Date.now(),
-      payload: { kind: "snapshot", snapshot },
-    };
-    for (const wire of encodeV4TopicFrames(logicalFrame, sub, deliveryKind)) {
-      this.callbacks.emitConversationFrame(wire);
-    }
+    emitConversationSnapshotFrames(sub, this.projector.getSnapshot(), deliveryKind, (wire) =>
+      this.callbacks.emitConversationFrame(wire),
+    );
   }
 
   private broadcastCommit(commit: ProjectionCommit | null): void {
     if (!commit || commit.deltas.length === 0 || this.disposed) return;
     this.lastActivityAt = Date.now();
-    for (const sub of this.subscriptions.values()) {
-      const logicalFrame: ConversationTopicFrame = {
-        topic: sub.topic,
-        subscriptionId: sub.subscriptionId,
-        fromSeq: commit.fromSeq,
-        toSeq: commit.toSeq,
-        sentAt: this.lastActivityAt,
-        payload: { kind: "deltas", deltas: [...commit.deltas] },
-      };
-      for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
-        this.callbacks.emitConversationFrame(wire);
-      }
-    }
+    emitConversationDeltaFrames(this.subscriptions.values(), commit, this.lastActivityAt, (wire) =>
+      this.callbacks.emitConversationFrame(wire),
+    );
     if (this.publishedToIndex) {
       this.callbacks.onSessionPublishedOrUpdated(this.getSummary());
     }

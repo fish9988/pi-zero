@@ -238,6 +238,12 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       return controller.getRowsRange(params.beforeRowId, params.limit);
     },
 
+    async conversationFileChangesV4(params) {
+      const controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
+      if (!controller) return { files: 0, additions: 0, deletions: 0, items: [] };
+      return controller.getTurnFileChanges(params.target);
+    },
+
     async sendConversationCommandV4(params) {
       const parsed = parseCommandEnvelope(params.envelope);
       if (!parsed.ok) {
@@ -326,7 +332,9 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
         });
       }
       const ack = await controller.executeCommand(envelope);
-      hub.rememberCommandAck(bucket, sessionId, envelope.commandId, ack);
+      if (ack.status === "accepted" || ack.status === "noop") {
+        hub.rememberCommandAck(bucket, sessionId, envelope.commandId, ack);
+      }
       return ack;
     },
 

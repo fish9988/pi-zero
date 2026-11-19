@@ -11,6 +11,7 @@ import type {
   SessionPhase,
   StatePatch,
   TimelineMarkerRow,
+  ToolCallRow,
   TurnHeaderRow,
   TurnWorkSegment,
   UserInputRow,
@@ -174,6 +175,89 @@ export function buildCompactionMarkerRow(input: {
       ...(typeof input.tokensBefore === "number" ? { tokensBefore: input.tokensBefore } : {}),
       ...(typeof input.tokensAfter === "number" ? { tokensAfter: input.tokensAfter } : {}),
     },
+  };
+}
+
+/**
+ * 构造符合 Zod union 约束的 `modelChange` 轻边界分隔行：
+ * `fromProvider` 与 `fromModel` 必须同时非空存在，或同时省略。
+ */
+export function buildModelChangeMarkerRow(input: {
+  rowId: number;
+  turnId: string;
+  createdAt: number;
+  createdAtSeq: number;
+  fromProvider?: string | undefined;
+  fromModel?: string | undefined;
+  toProvider: string;
+  toModel: string;
+  toThought: string;
+  sourceCommandId?: string | undefined;
+}): TimelineMarkerRow {
+  const fromProvider = input.fromProvider?.trim();
+  const fromModel = input.fromModel?.trim();
+  const hasCompleteFrom = Boolean(fromProvider && fromModel);
+  const marker: Extract<TimelineMarkerRow["marker"], { type: "modelChange" }> = hasCompleteFrom
+    ? {
+        type: "modelChange",
+        fromProvider: fromProvider!,
+        fromModel: fromModel!,
+        toProvider: input.toProvider,
+        toModel: input.toModel,
+        toThought: input.toThought,
+      }
+    : {
+        type: "modelChange",
+        toProvider: input.toProvider,
+        toModel: input.toModel,
+        toThought: input.toThought,
+      };
+  return {
+    kind: "timelineMarker",
+    rowId: input.rowId,
+    turnId: input.turnId,
+    entityId: `model_change_${input.rowId}`,
+    productTurnId: input.turnId,
+    visibility: "visible",
+    createdAt: input.createdAt,
+    createdAtSeq: input.createdAtSeq,
+    ...(input.sourceCommandId ? { sourceCommandId: input.sourceCommandId } : {}),
+    lane: "lightBoundary",
+    marker,
+  };
+}
+
+export function buildToolCallRow(input: {
+  rowId: number;
+  turnId: string;
+  createdAt: number;
+  createdAtSeq: number;
+  toolCallId: string;
+  toolName: string;
+  status: ToolCallRow["status"];
+  inputText: string;
+  parsedInput?: unknown;
+  assistantResponseId?: string | undefined;
+  startedAt?: number | undefined;
+  endedAt?: number | undefined;
+}): ToolCallRow {
+  return {
+    kind: "toolCall",
+    rowId: input.rowId,
+    turnId: input.turnId,
+    entityId: `tool_${input.toolCallId}`,
+    productTurnId: input.turnId,
+    visibility: "visible",
+    createdAt: input.createdAt,
+    createdAtSeq: input.createdAtSeq,
+    ...(input.assistantResponseId ? { assistantResponseId: input.assistantResponseId } : {}),
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    status: input.status,
+    inputText: input.inputText,
+    ...(input.parsedInput !== undefined ? { input: input.parsedInput } : {}),
+    ...(typeof input.startedAt === "number" ? { startedAt: input.startedAt } : {}),
+    ...(typeof input.endedAt === "number" ? { endedAt: input.endedAt } : {}),
   };
 }
 

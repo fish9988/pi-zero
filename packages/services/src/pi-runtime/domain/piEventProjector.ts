@@ -12,6 +12,7 @@ import {
   type SessionErrorInfo,
   type StatePatch,
   type TurnHeaderRow,
+  type V4ConversationFileChangesResult,
   type WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { PiRpcEvent } from "#src/pi-runtime/domain/piRpcTypes.js";
@@ -22,6 +23,7 @@ import {
 } from "#src/pi-runtime/domain/piQueueProjector.js";
 import {
   appendGuidedWorkSegment,
+  buildModelChangeMarkerRow,
   buildPhaseTransitionPatch,
   buildTurnHeaderRow,
   buildUserInputRow,
@@ -37,6 +39,7 @@ import {
 import { reducePiStreamEvent } from "#src/pi-runtime/domain/piStreamEventReducer.js";
 import {
   buildTurnSettlementDeltas,
+  resetTurnTransientTracking,
   type PiProjectorRuntimeState,
 } from "#src/pi-runtime/domain/piTurnSettlement.js";
 
@@ -72,6 +75,7 @@ export class PiEventProjector {
 
   constructor(input: {
     sessionId: string;
+    workspacePath?: string | undefined;
     logEpoch: string;
     attemptId: string;
     config: SessionConfigState;
@@ -81,6 +85,7 @@ export class PiEventProjector {
   }) {
     const initialSnapshot = createInitialConversationSnapshot(input);
     this.state = {
+      workspacePath: input.workspacePath ?? "",
       snapshot: initialSnapshot,
       nextRowId: 0,
       turnCounter: 0,
@@ -106,6 +111,10 @@ export class PiEventProjector {
       activeCompactionRowId: null,
       activeCompactionOrigin: "auto",
       pendingUserEchoes: [],
+      toolCallsByCallId: new Map(),
+      toolCallIdByContentIndex: new Map(),
+      turnFileChanges: new Map(),
+      fileChangesByTurnId: new Map(),
       getRowById: (rowId) => this.getRowById(rowId),
     };
   }
@@ -215,6 +224,7 @@ export class PiEventProjector {
     this.state.turnAborted = false;
     this.state.turnFailedError = null;
     this.state.stoppingRequested = false;
+    resetTurnTransientTracking(this.state);
 
     if (input.recordEchoExpectation !== false) {
       this.state.pendingUserEchoes.push(input.text);
@@ -398,6 +408,88 @@ export class PiEventProjector {
     return this.commitDeltas([{ op: "state.updated", patch }], true);
   }
 
+  /**
+   * 原子提交模型/思考档位切换：在已有对话历史的会话上切换模型时追加合规 `modelChange` 轻边界分隔行。
+   */
+  applyModelSwitch(input: {
+    provider: string;
+    model: string;
+    thought: string;
+    thoughtLevels: readonly string[];
+    nowMs: number;
+    sourceCommandId?: string | undefined;
+  }): ProjectionCommit | null {
+    const prev = this.state.snapshot.config;
+    const nextConfig: SessionConfigState = {
+      ...prev,
+      provider: input.provider,
+      model: input.model,
+      thought: input.thought,
+      thoughtLevels: [...input.thoughtLevels],
+      modelSelection: {
+        providerId: input.provider,
+        modelId: input.model,
+        ...(input.thought ? { options: { reasoningLevel: input.thought } } : {}),
+      },
+    };
+    const deltas: ConversationDelta[] = [];
+    const modelChanged = prev.provider !== input.provider || prev.model !== input.model;
+    if (modelChanged && this.allRows.length > 0 && input.provider && input.model) {
+      const markerRowId = ++this.state.nextRowId;
+      deltas.push({
+        op: "row.appended",
+        row: buildModelChangeMarkerRow({
+          rowId: markerRowId,
+          turnId: `turn_model_${markerRowId}`,
+          createdAt: input.nowMs,
+          createdAtSeq: this.state.snapshot.seq + 1,
+          fromProvider: prev.provider,
+          fromModel: prev.model,
+          toProvider: input.provider,
+          toModel: input.model,
+          toThought: input.thought,
+          sourceCommandId: input.sourceCommandId,
+        }),
+      });
+    }
+    const patch: StatePatch = {
+      config: nextConfig,
+      inputRouting: computeInputRouting(
+        this.state.snapshot.control.phase,
+        nextConfig.followupMode,
+        this.state.snapshot.queue,
+      ),
+    };
+    deltas.push({ op: "state.updated", patch });
+    return this.commitDeltas(deltas, true);
+  }
+
+  getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
+    const row = this.getRowById(target.rowId);
+    const turnId = row && row.kind === "turnHeader" ? row.turnId : target.entityId;
+    const stored = this.state.fileChangesByTurnId.get(turnId);
+    if (stored) return stored;
+    if (turnId === this.state.activeTurnId && this.state.turnFileChanges.size > 0) {
+      let additions = 0;
+      let deletions = 0;
+      const items: V4ConversationFileChangesResult["items"] = [];
+      for (const entry of this.state.turnFileChanges.values()) {
+        additions += entry.additions;
+        deletions += entry.deletions;
+        items.push({
+          path: entry.path,
+          additions: entry.additions,
+          deletions: entry.deletions,
+          writeCount: entry.writeCount,
+          toolNames: [...entry.toolNames],
+          patches: [...entry.patches],
+        });
+      }
+      return { files: items.length, additions, deletions, state: "active", items };
+    }
+    return { files: 0, additions: 0, deletions: 0, items: [] };
+  }
+
   applyRename(title: string): ProjectionCommit | null {
     return this.commitDeltas(
       [{ op: "state.updated", patch: { meta: { title: title.trim(), titleSource: "custom" } } }],
@@ -444,12 +536,15 @@ export class PiEventProjector {
       } else if (delta.op === "row.delta") {
         const idx = this.rowIndexById.get(delta.rowId);
         const target = idx === undefined ? undefined : this.allRows[idx];
-        if (
-          idx !== undefined &&
-          target &&
-          (target.kind === "assistantText" || target.kind === "reasoning")
-        ) {
-          this.allRows[idx] = { ...target, text: target.text + delta.append };
+        if (idx !== undefined && target) {
+          if (
+            delta.path === "text" &&
+            (target.kind === "assistantText" || target.kind === "reasoning")
+          ) {
+            this.allRows[idx] = { ...target, text: target.text + delta.append };
+          } else if (delta.path === "inputText" && target.kind === "toolCall") {
+            this.allRows[idx] = { ...target, inputText: target.inputText + delta.append };
+          }
         }
       } else if (delta.op === "state.updated") {
         nextSnapshot = { ...nextSnapshot, ...delta.patch };

@@ -9,10 +9,6 @@ import type {
   CommandPayloadMap,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
-import {
-  getSupportedThinkingLevels,
-  pickDefaultThinkingLevel,
-} from "#src/pi-runtime/domain/piModelCapability.js";
 import type {
   PiEventProjector,
   ProjectionCommit,
@@ -32,6 +28,10 @@ import {
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
+import {
+  resolvePiModelTarget,
+  type ResolvedModelTarget,
+} from "#src/pi-runtime/adapters/piModelSync.js";
 import type { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
 
 const logger = createServiceLogger("pi-session-commands");
@@ -43,7 +43,11 @@ export interface PiSessionCommandHost {
   getLiveClient(): PiRpcClient | null;
   ensureClient(): Promise<PiRpcClient>;
   broadcastCommit(commit: ProjectionCommit | null): void;
-  syncModelConfigToClient(client: PiRpcClient): Promise<void>;
+  applyLiveModelSwitch(target: ResolvedModelTarget): Promise<{
+    readonly thought: string;
+    readonly thoughtLevels: readonly string[];
+    readonly contextWindow?: number | undefined;
+  }>;
   startFreshTurn(input: {
     commandId: string;
     clientId: string;
@@ -271,41 +275,50 @@ export async function dispatchPiAuxCommand(
 
     case "switchModelConfig": {
       const payload = envelope.payload as CommandPayloadMap["switchModelConfig"];
-      const models = host.catalog.getSnapshot().models;
-      const matched = models.find(
-        (candidate) => candidate.provider === payload.provider && candidate.id === payload.model,
-      );
-      const thoughtLevels = matched
-        ? getSupportedThinkingLevels(matched)
-        : payload.thought
-          ? [payload.thought]
-          : projector.getSnapshot().config.thoughtLevels;
-      const thought = matched
-        ? pickDefaultThinkingLevel(matched, payload.thought)
-        : payload.thought || projector.getSnapshot().config.thought;
-
       const prev = projector.getSnapshot().config;
-      projector.setContextWindowMax(matched?.contextWindow);
+      const target = await resolvePiModelTarget({
+        catalog: host.catalog,
+        provider: payload.provider,
+        model: payload.model,
+        requestedThought: payload.thought,
+        fallbackThoughtLevels: prev.thoughtLevels,
+        fallbackThought: prev.thought,
+      });
+
+      let finalThought = target.thought;
+      let finalThoughtLevels = target.thoughtLevels;
+      let finalContextWindow = target.contextWindow;
+
+      if (host.getLiveClient()) {
+        try {
+          const synced = await host.applyLiveModelSwitch(target);
+          finalThought = synced.thought;
+          finalThoughtLevels = synced.thoughtLevels;
+          finalContextWindow = synced.contextWindow ?? finalContextWindow;
+        } catch (error) {
+          const redacted = formatRedactedPiError(error);
+          logger.warn(undefined, `Pi 切换模型同步失败 session=${host.sessionId}: ${redacted}`);
+          return createCommandAck({
+            commandId: envelope.commandId,
+            status: "failed",
+            revisionAtDecision: projector.getRevision(),
+            reasonCode: "fault.pi.modelSwitchFailed",
+            message: redacted,
+          });
+        }
+      }
+
+      projector.setContextWindowMax(finalContextWindow);
       host.broadcastCommit(
-        projector.applyConfigUpdate({
-          ...prev,
-          provider: payload.provider,
-          model: payload.model,
-          thought,
-          thoughtLevels,
-          modelSelection: {
-            providerId: payload.provider,
-            modelId: payload.model,
-            ...(thought ? { options: { reasoningLevel: thought } } : {}),
-          },
+        projector.applyModelSwitch({
+          provider: target.provider,
+          model: target.model,
+          thought: finalThought,
+          thoughtLevels: finalThoughtLevels,
+          nowMs: Date.now(),
+          sourceCommandId: envelope.commandId,
         }),
       );
-      const liveClient = host.getLiveClient();
-      if (liveClient) {
-        await host.syncModelConfigToClient(liveClient).catch((error: unknown) => {
-          logger.warn(undefined, `Pi 切换模型同步失败: ${formatRedactedPiError(error)}`);
-        });
-      }
       return createCommandAck({
         commandId: envelope.commandId,
         status: "accepted",

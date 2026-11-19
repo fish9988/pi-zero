@@ -162,7 +162,6 @@ export type PiUnsupportedAgentMethods = Pick<
   | "conversationWorkflowRunWorkspaceV4"
   | "conversationWorkflowRunNodeResultV4"
   | "backgroundBashOutputV4"
-  | "conversationFileChangesV4"
   | "conversationFileRewindPreviewV4"
   | "attachmentBeginV4"
   | "attachmentChunkV4"
@@ -337,12 +336,6 @@ export function createPiUnsupportedAgentMethods(): PiUnsupportedAgentMethods {
     conversationWorkflowRunWorkspaceV4: () => unsupported("conversationWorkflowRunWorkspaceV4"),
     conversationWorkflowRunNodeResultV4: () => unsupported("conversationWorkflowRunNodeResultV4"),
     backgroundBashOutputV4: () => unsupported("backgroundBashOutputV4"),
-    conversationFileChangesV4: async () => ({
-      files: 0,
-      additions: 0,
-      deletions: 0,
-      items: [],
-    }),
     conversationFileRewindPreviewV4: () => unsupported("conversationFileRewindPreviewV4"),
     attachmentBeginV4: () => unsupported("attachmentBeginV4"),
     attachmentChunkV4: () => unsupported("attachmentChunkV4"),

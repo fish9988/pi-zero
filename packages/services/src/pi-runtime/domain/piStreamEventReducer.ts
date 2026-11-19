@@ -2,7 +2,7 @@
  * Pi RPC 流式事件归约函数（domain 层，纯 TypeScript，无 IO/计时器）。
  * 负责将 message_* / compaction_* / auto_retry_* / agent_* 归约为 ConversationDelta 列表。
  */
-import type { ConversationDelta, QueueItem, QueueState } from "@zcode/shared/zcode-protocol-v4";
+import type { ConversationDelta } from "@zcode/shared/zcode-protocol-v4";
 import type { PiRpcEvent } from "#src/pi-runtime/domain/piRpcTypes.js";
 import {
   dequeueMatchingQueueItem,
@@ -15,8 +15,6 @@ import {
   buildPhaseTransitionPatch,
   buildReasoningRow,
   buildTurnHeaderRow,
-  buildUserInputRow,
-  closeOpenWorkSegments,
   extractPiAssistantText,
   extractPiUserMessageText,
   resolveCompactionEndMarker,
@@ -29,6 +27,11 @@ import {
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import {
+  reduceToolCallAssistantEvent,
+  reduceToolExecutionEvent,
+} from "#src/pi-runtime/domain/piToolReducer.js";
+import {
+  buildDequeuedUserTurnDeltas,
   buildTurnSettlementDeltas,
   closeOpenReasoningRow,
   closeOpenStreamingRows,
@@ -114,87 +117,6 @@ function openAssistantTextRow(
   });
 }
 
-function reduceDequeuedUserMessage(
-  state: PiProjectorRuntimeState,
-  item: QueueItem,
-  nextQueue: QueueState,
-  nowMs: number,
-): ReducePiEventResult {
-  const deltas: ConversationDelta[] = [...closeOpenStreamingRows(state, nowMs, "complete")];
-  if (state.activeTurnHeaderRowId !== null) {
-    const prevHeader = state.getRowById(state.activeTurnHeaderRowId);
-    if (prevHeader && prevHeader.kind === "turnHeader" && prevHeader.state === "running") {
-      const closedSegments = closeOpenWorkSegments(state.activeWorkSegments, nowMs);
-      deltas.push({
-        op: "row.upserted",
-        row: {
-          ...prevHeader,
-          state: "completedSuccess",
-          endedAt: nowMs,
-          activeMs: Math.max(1, nowMs - state.activeTurnStartedAt),
-          outputTokens: state.turnOutputTokens,
-          ...(closedSegments ? { workSegments: closedSegments } : {}),
-        },
-      });
-    }
-  }
-
-  state.turnCounter += 1;
-  const turnId = `turn_${state.turnCounter}`;
-  const headerRowId = allocateRowId(state);
-  const userRowId = allocateRowId(state);
-  deltas.push(
-    {
-      op: "row.appended",
-      row: buildTurnHeaderRow({
-        rowId: headerRowId,
-        turnId,
-        createdAt: nowMs,
-        createdAtSeq: state.snapshot.seq + deltas.length + 1,
-        sourceCommandId: item.sourceCommandId,
-      }),
-    },
-    {
-      op: "row.appended",
-      row: buildUserInputRow({
-        rowId: userRowId,
-        turnId,
-        createdAt: nowMs,
-        createdAtSeq: state.snapshot.seq + deltas.length + 2,
-        text: item.text,
-        commandId: item.sourceCommandId,
-        clientId: item.clientId,
-        modelSelection: item.modelSelection,
-        inputOrigin: item.inputOrigin,
-      }),
-    },
-  );
-
-  state.activeTurnId = turnId;
-  state.activeTurnHeaderRowId = headerRowId;
-  state.activeTurnStartedAt = nowMs;
-  state.activeWorkSegments = undefined;
-  state.currentResponseId = undefined;
-  state.emittedTextInCurrentAssistantMsg = false;
-  state.turnOutputTokens = 0;
-
-  deltas.push({
-    op: "state.updated",
-    patch: buildPhaseTransitionPatch({
-      phase: "running",
-      stopState: "stoppable",
-      followupMode: state.snapshot.config.followupMode,
-      queue: nextQueue,
-      nowMs,
-      activeTurnId: turnId,
-      sourceCommandId: item.sourceCommandId,
-      lastError: null,
-      apiRetry: null,
-    }),
-  });
-  return { bumpRevision: true, deltas };
-}
-
 function reduceMessageUpdate(
   state: PiProjectorRuntimeState,
   event: Extract<PiRpcEvent, { type: "message_update" }>,
@@ -268,6 +190,11 @@ function reduceMessageUpdate(
           if (preview) state.lastAssistantPreview = preview;
         }
       }
+      return { deltas, bumpRevision: false };
+    case "toolcall_start":
+    case "toolcall_delta":
+    case "toolcall_end":
+      reduceToolCallAssistantEvent(state, sub, turnId, nowMs, deltas);
       return { deltas, bumpRevision: false };
     case "done":
       deltas.push(...closeOpenStreamingRows(state, nowMs, "complete"));
@@ -366,6 +293,7 @@ export function reducePiStreamEvent(
         state.responseCounter += 1;
         state.currentResponseId = `resp_${state.responseCounter}`;
         state.emittedTextInCurrentAssistantMsg = false;
+        state.toolCallIdByContentIndex.clear();
         return { deltas: closeOpenStreamingRows(state, nowMs, "complete"), bumpRevision: false };
       }
       if (event.message.role === "user") {
@@ -376,7 +304,10 @@ export function reducePiStreamEvent(
         }
         const dequeued = dequeueMatchingQueueItem(state.snapshot.queue, text);
         if (dequeued.item) {
-          return reduceDequeuedUserMessage(state, dequeued.item, dequeued.queue, nowMs);
+          return {
+            bumpRevision: true,
+            deltas: buildDequeuedUserTurnDeltas(state, dequeued.item, dequeued.queue, nowMs),
+          };
         }
       }
       return null;
@@ -385,6 +316,14 @@ export function reducePiStreamEvent(
       return reduceMessageUpdate(state, event, nowMs);
     case "message_end":
       return reduceMessageEnd(state, event.message, nowMs);
+    case "tool_execution_start":
+    case "tool_execution_update":
+    case "tool_execution_end": {
+      const deltas: ConversationDelta[] = [];
+      const turnId = ensureActiveTurnId(state, nowMs, deltas);
+      reduceToolExecutionEvent(state, event, turnId, nowMs, deltas);
+      return { deltas, bumpRevision: false };
+    }
     case "compaction_start":
     case "auto_compaction_start": {
       const origin: "manual" | "auto" = event.reason === "manual" ? "manual" : "auto";
