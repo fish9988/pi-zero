@@ -6,6 +6,7 @@ import type {
   ConversationSnapshot,
   QueueItem,
   QueueState,
+  SessionConfigState,
   SessionErrorInfo,
   SessionPhase,
   TurnHeaderRow,
@@ -13,15 +14,21 @@ import type {
   V4ConversationFileChangesResult,
   WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
+import { createHydratedConversationSnapshot } from "#src/pi-runtime/domain/piArchiveSnapshotFactory.js";
 import type { StructuredDiffHunk } from "#src/pi-runtime/domain/piEditDiffMapper.js";
+import type { PiPendingExtensionUiMeta } from "#src/pi-runtime/domain/piExtensionUiBridge.js";
 import { pauseQueueWithReason } from "#src/pi-runtime/domain/piQueueProjector.js";
 import {
+  buildModelChangeMarkerRow,
   buildPhaseTransitionPatch,
   buildTurnHeaderRow,
   buildUserInputRow,
   closeOpenWorkSegments,
 } from "#src/pi-runtime/domain/piRowBuilders.js";
-import { deriveAssistantPreview } from "#src/pi-runtime/domain/piSnapshotFactory.js";
+import {
+  computeInputRouting,
+  deriveAssistantPreview,
+} from "#src/pi-runtime/domain/piSnapshotFactory.js";
 
 export interface PiTrackedToolCall {
   readonly rowId: number;
@@ -74,6 +81,7 @@ export interface PiProjectorRuntimeState {
   readonly toolCallIdByContentIndex: Map<number, string>;
   readonly turnFileChanges: Map<string, PiTurnFileChangeEntry>;
   readonly fileChangesByTurnId: Map<string, V4ConversationFileChangesResult>;
+  readonly pendingExtensionUiById: Map<string, PiPendingExtensionUiMeta>;
   getRowById(rowId: number): WireConversationRow | undefined;
 }
 
@@ -255,17 +263,24 @@ export function buildTurnSettlementDeltas(
     nextQueue = pauseQueueWithReason(nextQueue, "error");
   }
 
+  const clearInteractions =
+    state.pendingExtensionUiById.size > 0 || state.snapshot.pendingInteractions.length > 0;
+  state.pendingExtensionUiById.clear();
+
   deltas.push({
     op: "state.updated",
-    patch: buildPhaseTransitionPatch({
-      phase: finalPhase,
-      stopState: "idle",
-      followupMode: state.snapshot.config.followupMode,
-      queue: nextQueue,
-      nowMs,
-      lastError: errorInfo,
-      apiRetry: null,
-    }),
+    patch: {
+      ...buildPhaseTransitionPatch({
+        phase: finalPhase,
+        stopState: "idle",
+        followupMode: state.snapshot.config.followupMode,
+        queue: nextQueue,
+        nowMs,
+        lastError: errorInfo,
+        apiRetry: null,
+      }),
+      ...(clearInteractions ? { pendingInteractions: [] } : {}),
+    },
   });
 
   state.activeTurnHeaderRowId = null;
@@ -359,6 +374,145 @@ export function buildDequeuedUserTurnDeltas(
       lastError: null,
       apiRetry: null,
     }),
+  });
+  return deltas;
+}
+
+/** 读取指定回合的文件变更明细（先读已收口快照，再兜底当前进行中回合）。 */
+export function resolveTurnFileChangesResult(
+  state: PiProjectorRuntimeState,
+  target: { rowId: number; entityId: string },
+): V4ConversationFileChangesResult {
+  const row = state.getRowById(target.rowId);
+  const turnId = row && row.kind === "turnHeader" ? row.turnId : target.entityId;
+  const stored = state.fileChangesByTurnId.get(turnId);
+  if (stored) return stored;
+  if (turnId === state.activeTurnId && state.turnFileChanges.size > 0) {
+    let additions = 0;
+    let deletions = 0;
+    const items: V4ConversationFileChangesResult["items"] = [];
+    for (const entry of state.turnFileChanges.values()) {
+      additions += entry.additions;
+      deletions += entry.deletions;
+      items.push({
+        path: entry.path,
+        additions: entry.additions,
+        deletions: entry.deletions,
+        writeCount: entry.writeCount,
+        toolNames: [...entry.toolNames],
+        patches: [...entry.patches],
+      });
+    }
+    return { files: items.length, additions, deletions, state: "active", items };
+  }
+  return { files: 0, additions: 0, deletions: 0, items: [] };
+}
+
+export interface HydratedPiSessionReplacement {
+  readonly title: string;
+  readonly titleSource: "default" | "generated" | "custom";
+  readonly lastAssistantPreview: string | undefined;
+  readonly phase: SessionPhase;
+  readonly config: SessionConfigState;
+  readonly contextWindowMax: number;
+  readonly usage: ConversationSnapshot["usage"];
+  readonly rows: WireConversationRow[];
+  readonly fileChangesByTurnId: Map<string, V4ConversationFileChangesResult>;
+}
+
+/** 用重新水合的磁盘历史替换投影器状态（供 rewindTo 截断后就地刷新）。 */
+export function applyHydratedReplacementToState(
+  state: PiProjectorRuntimeState,
+  allRows: WireConversationRow[],
+  rowIndexById: Map<number, number>,
+  hydrated: HydratedPiSessionReplacement,
+  newLogEpoch: string,
+): void {
+  allRows.length = 0;
+  rowIndexById.clear();
+  for (const row of hydrated.rows) {
+    rowIndexById.set(row.rowId, allRows.length);
+    allRows.push(row);
+  }
+  state.fileChangesByTurnId.clear();
+  for (const [k, v] of hydrated.fileChangesByTurnId) state.fileChangesByTurnId.set(k, v);
+  state.pendingExtensionUiById.clear();
+  resetTurnTransientTracking(state);
+  state.activeTurnHeaderRowId = null;
+  state.activeWorkSegments = undefined;
+  state.nextRowId = hydrated.rows.reduce((max, r) => Math.max(max, r.rowId), 0);
+  state.turnCounter = hydrated.rows.filter((r) => r.kind === "turnHeader").length;
+  state.lastAssistantPreview = hydrated.lastAssistantPreview;
+  state.contextWindowMax = hydrated.contextWindowMax || state.contextWindowMax;
+  state.snapshot = createHydratedConversationSnapshot({
+    sessionId: state.snapshot.sessionId,
+    logEpoch: newLogEpoch,
+    attemptId: state.snapshot.runtimeInitialization?.attemptId ?? "pi_hydrated_0",
+    phase: hydrated.phase,
+    config: hydrated.config,
+    title: hydrated.title,
+    titleSource: hydrated.titleSource,
+    usage: hydrated.usage,
+    rows: hydrated.rows,
+  });
+}
+
+/** 构造模型/思考档位切换所需的配置补丁与可选 `modelChange` 分隔行增量。 */
+export function buildModelSwitchDeltas(
+  state: PiProjectorRuntimeState,
+  rowCount: number,
+  input: {
+    provider: string;
+    model: string;
+    thought: string;
+    thoughtLevels: readonly string[];
+    nowMs: number;
+    sourceCommandId?: string | undefined;
+  },
+): ConversationDelta[] {
+  const prev = state.snapshot.config;
+  const nextConfig = {
+    ...prev,
+    provider: input.provider,
+    model: input.model,
+    thought: input.thought,
+    thoughtLevels: [...input.thoughtLevels],
+    modelSelection: {
+      providerId: input.provider,
+      modelId: input.model,
+      ...(input.thought ? { options: { reasoningLevel: input.thought } } : {}),
+    },
+  };
+  const deltas: ConversationDelta[] = [];
+  const modelChanged = prev.provider !== input.provider || prev.model !== input.model;
+  if (modelChanged && rowCount > 0 && input.provider && input.model) {
+    const markerRowId = ++state.nextRowId;
+    deltas.push({
+      op: "row.appended",
+      row: buildModelChangeMarkerRow({
+        rowId: markerRowId,
+        turnId: `turn_model_${markerRowId}`,
+        createdAt: input.nowMs,
+        createdAtSeq: state.snapshot.seq + 1,
+        fromProvider: prev.provider,
+        fromModel: prev.model,
+        toProvider: input.provider,
+        toModel: input.model,
+        toThought: input.thought,
+        sourceCommandId: input.sourceCommandId,
+      }),
+    });
+  }
+  deltas.push({
+    op: "state.updated",
+    patch: {
+      config: nextConfig,
+      inputRouting: computeInputRouting(
+        state.snapshot.control.phase,
+        nextConfig.followupMode,
+        state.snapshot.queue,
+      ),
+    },
   });
   return deltas;
 }

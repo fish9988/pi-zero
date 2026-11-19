@@ -32,12 +32,9 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
 } from "lexical";
-import { useSubagents } from "@/hooks/useSubagents.js";
-import { useSkills } from "@/hooks/useSkills.js";
 import { buildSlashApplyMentionPayload } from "@/lib/slashApplyMentionPayload.js";
-import { filterSkillsForProvider } from "@/lib/skillSourceFilter.js";
+import { usePiSlashCommands } from "@/pi-conversation/index.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
-import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { $createPromptMentionNode } from "./mentions/nodes/PromptMentionNode.js";
 import {
   extractActivePromptInputTrigger,
@@ -51,8 +48,6 @@ import {
 import { MentionPanel } from "./mentions/components/MentionPanel.js";
 import {
   buildAppSlashCommandSuggestions,
-  buildSkillSuggestions,
-  buildSubagentSuggestions,
   buildSlashSuggestions,
   getTextAroundCursor,
   isAppSlashCommandSuggestion,
@@ -151,35 +146,16 @@ function useSlashTriggerListener(
 
 export function SlashCommandPlugin({
   workspacePath,
-  workspaceIdentity,
-  sessionId,
-  provider,
   container,
   disabled = false,
   excludedCommandNames,
   appCommands,
 }: SlashCommandPluginProps & { provider: ZCodeProvider }) {
   const [editor] = useLexicalComposerContext();
-  const { intl, locale } = useZCodeIntl();
+  const { intl } = useZCodeIntl();
   const [activeTrigger, setActiveTrigger] = useState<ActivePromptInputTrigger | null>(null);
-  // 远程 workspace 的 slashCommands 写在 workspaceIdentity 桶。
-  // 这里只按 workspacePath 读取会落到 path 桶，表现为 ZCode Agent 已收到 available_commands_update 但 / 面板为空。
-  const commands = useSlashCommands(workspacePath, workspaceIdentity);
-  const {
-    agents,
-    loading: subagentsLoading,
-    error: subagentsError,
-  } = useSubagents(workspacePath, provider, workspaceIdentity);
-  const {
-    skills,
-    loading: skillsLoading,
-    error: skillsError,
-  } = useSkills({
-    workspacePath,
-    workspaceIdentity,
-    sessionId: sessionId ?? null,
-    enabled: !disabled && activeTrigger?.trigger === "/",
-  });
+  // 严格使用 Pi 1.5.2 原生 24 条斜杠命令 + 实时 get_commands（扩展/Prompt/Skill），绝不混入旧版 ZCode 非 Pi 命令。
+  const commands = usePiSlashCommands(workspacePath);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const dismissedSignatureRef = useRef<string | null>(null);
   const activeSignatureRef = useRef<string | null>(null);
@@ -192,42 +168,23 @@ export function SlashCommandPlugin({
     const cliSuggestions = buildSlashSuggestions(commands).filter(
       (item) => !excluded.has(item.value) && !recoveryNames.has(item.value),
     );
-    // App 层命令追加在 CLI catalog 之后展示；CLI 已提供同名命令时以 CLI 为准，避免遮蔽。
     const cliValues = new Set(cliSuggestions.map((item) => item.value));
     const appSuggestions = buildAppSlashCommandSuggestions(appCommands ?? []).filter(
       (item) => !cliValues.has(item.value) && !excluded.has(item.value),
     );
     return [...cliSuggestions, ...appSuggestions];
   }, [appCommands, commands, excludedCommandNames]);
-  const subagentSuggestions = useMemo(() => buildSubagentSuggestions(agents), [agents]);
-  const skillSuggestions = useMemo(
-    () =>
-      buildSkillSuggestions(
-        filterSkillsForProvider(skills, provider).filter((skill) => skill.enabled),
-        locale,
-      ),
-    [locale, provider, skills],
-  );
   const filteredCommandSuggestions = useMemo(
     () => filterPromptInputSuggestions(commandSuggestions, activeTrigger?.query ?? null),
     [commandSuggestions, activeTrigger?.query],
   );
-  const filteredSubagentSuggestions = useMemo(
-    () => filterPromptInputSuggestions(subagentSuggestions, activeTrigger?.query ?? null),
-    [subagentSuggestions, activeTrigger?.query],
-  );
-  const filteredSkillSuggestions = useMemo(
-    () => filterPromptInputSuggestions(skillSuggestions, activeTrigger?.query ?? null),
-    [skillSuggestions, activeTrigger?.query],
-  );
-  const filteredSuggestions = useMemo(
-    () => [
-      ...filteredCommandSuggestions,
-      ...filteredSkillSuggestions,
-      ...filteredSubagentSuggestions,
-    ],
-    [filteredCommandSuggestions, filteredSkillSuggestions, filteredSubagentSuggestions],
-  );
+  const filteredSkillSuggestions = useMemo<PromptInputSuggestionItem[]>(() => [], []);
+  const filteredSubagentSuggestions = useMemo<PromptInputSuggestionItem[]>(() => [], []);
+  const skillsLoading = false;
+  const skillsError = null;
+  const subagentsLoading = false;
+  const subagentsError = null;
+  const filteredSuggestions = filteredCommandSuggestions;
   const activeSignature = useMemo(
     () => getPromptInputTriggerSignature(activeTrigger),
     [activeTrigger],

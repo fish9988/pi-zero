@@ -19,13 +19,10 @@ import {
   type CommandAck,
   type CommandEnvelope,
   type CommandPayloadMap,
-  type ConversationSnapshot,
-  type ConversationTopicWireCandidate,
   type SessionSummary,
   type SubscribeAck,
   type V4ConversationFileChangesResult,
   type V4ConversationRowsRangeResult,
-  type WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import type { PiModelInfo, PiRpcEvent, PiRpcExitInfo } from "#src/pi-runtime/contract.js";
@@ -48,11 +45,14 @@ import {
 } from "#src/pi-runtime/adapters/piFrameEncoder.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import {
+  cancelClientInteractionsAndAbort,
   hydratePiClientInitialState,
   resolveInitialControllerConfig,
   resolveRequestedSelectionSwitch,
   spawnConfiguredPiClient,
   syncPiModelAndThoughtToClient,
+  type PiSessionControllerCallbacks,
+  type PiSessionControllerOptions,
   type ResolvedModelTarget,
 } from "#src/pi-runtime/adapters/piModelSync.js";
 import type { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
@@ -64,34 +64,7 @@ import {
 
 const logger = createServiceLogger("pi-session-controller");
 
-export interface PiSessionControllerCallbacks {
-  emitConversationFrame(frame: ConversationTopicWireCandidate): void;
-  onSessionPublishedOrUpdated(summary: SessionSummary): void;
-  onSessionLifecycleChanged(snapshot: SessionLifecycleSnapshot): void;
-  onSessionDeleted(sessionId: string): void;
-}
-
-export interface PiSessionControllerOptions {
-  readonly sessionId: string;
-  readonly workspaceId: string;
-  readonly workspacePath: string;
-  readonly workspaceIdentity?: string | undefined;
-  readonly cwd: string;
-  readonly parentSessionId?: string | undefined;
-  readonly modelSelection?: ModelSelection | undefined;
-  readonly thoughtLevel?: string | undefined;
-  readonly catalog: PiModelCatalog;
-  readonly env?: NodeJS.ProcessEnv | undefined;
-  readonly platform?: NodeJS.Platform | undefined;
-  readonly managedRuntimeDir?: string | undefined;
-  readonly hydratedFromDisk?:
-    | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
-    | undefined;
-  readonly readOnlyArchive?:
-    | { readonly snapshot: ConversationSnapshot; readonly rows: readonly WireConversationRow[] }
-    | undefined;
-  readonly callbacks: PiSessionControllerCallbacks;
-}
+export type { PiSessionControllerCallbacks, PiSessionControllerOptions };
 
 export class PiSessionController {
   readonly sessionId: string;
@@ -161,9 +134,37 @@ export class PiSessionController {
   isPublishedToIndex(): boolean {
     return this.publishedToIndex;
   }
-
   getRevision(): number {
     return this.projector.getRevision();
+  }
+  getSessionFilePath(): string | undefined {
+    return this.piSessionFile;
+  }
+  getLiveClient(): PiRpcClient | null {
+    return this.client?.alive ? this.client : null;
+  }
+  findTurnForCommand(commandId: string) {
+    return this.projector.findTurnForCommand(commandId);
+  }
+  getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
+    return this.projector.getTurnFileChanges(target);
+  }
+  unsubscribe(subscriptionId: string): void {
+    this.subscriptions.delete(subscriptionId);
+  }
+  async ensureReady(): Promise<void> {
+    if (this.disposed || this.readOnly) return;
+    await this.ensureClient();
+  }
+  reloadFromHydratedDisk(filePath: string, hydrated: HydratedPiSessionResult): void {
+    this.piSessionFile = filePath;
+    this.lastActivityAt = hydrated.lastActivityAt;
+    this.publishedToIndex = true;
+    this.projector.replaceWithHydratedSession(hydrated, `pi-${randomUUID()}`);
+    for (const sub of this.subscriptions.values()) {
+      this.emitSnapshotToSubscription(sub, "recovery");
+    }
+    this.callbacks.onSessionPublishedOrUpdated(this.getSummary());
   }
 
   getSummary(): SessionSummary {
@@ -211,14 +212,6 @@ export class PiSessionController {
     };
   }
 
-  findTurnForCommand(commandId: string) {
-    return this.projector.findTurnForCommand(commandId);
-  }
-
-  getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
-    return this.projector.getTurnFileChanges(target);
-  }
-
   subscribe(subscriptionId: string): SubscribeAck {
     const sub: TopicSubscriptionState = {
       subscriptionId,
@@ -237,20 +230,10 @@ export class PiSessionController {
     return { subscriptionId, mode: "snapshot", logEpoch: this.projector.getLogEpoch() };
   }
 
-  unsubscribe(subscriptionId: string): void {
-    this.subscriptions.delete(subscriptionId);
-  }
-
-  async ensureReady(): Promise<void> {
-    if (this.disposed || this.readOnly) return;
-    await this.ensureClient();
-  }
-
   async stopRuntime(): Promise<void> {
-    if (this.client?.alive) {
-      await this.client.clearQueue().catch(() => {});
-      await this.client.abort().catch(() => {});
-    }
+    const drained = this.projector.drainPendingExtensionUiInteractions();
+    this.broadcastCommit(drained.commit);
+    await cancelClientInteractionsAndAbort(this.client, drained.cancelledIds);
     await this.closeClientAndWait();
   }
 
@@ -306,6 +289,12 @@ export class PiSessionController {
   async disposeAndWait(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    const drained = this.projector.drainPendingExtensionUiInteractions();
+    if (this.client?.alive) {
+      for (const id of drained.cancelledIds) {
+        this.client.sendExtensionUiResponse({ id, cancelled: true });
+      }
+    }
     this.subscriptions.clear();
     await this.closeClientAndWait();
     this.callbacks.onSessionLifecycleChanged(this.getLifecycleSnapshot());
@@ -562,6 +551,8 @@ export class PiSessionController {
       this.client = null;
     }
     if (this.disposed) return;
+    const drained = this.projector.drainPendingExtensionUiInteractions();
+    this.broadcastCommit(drained.commit);
     if (isSessionRunningPhase(this.projector.getSnapshot().control.phase)) {
       const suffix = info.stderr ? `: ${info.stderr}` : "";
       this.broadcastCommit(

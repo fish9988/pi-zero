@@ -7,6 +7,7 @@ export const piRuntimeModule = {
   id: "pi-runtime",
   requires: [
     "agent-crash-diagnostic",
+    "pi-config-protocol",
     "provider",
     "rpc",
     "services",

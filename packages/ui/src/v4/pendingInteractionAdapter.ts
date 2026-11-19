@@ -108,17 +108,31 @@ export interface V4UserInputViewModel {
   prompt: string;
   freeText: boolean;
   sensitive?: boolean;
+  placeholder?: string;
+  prefill?: string;
+  multiline?: boolean;
   options: ReadonlyArray<{ optionId: string; label: string }>;
 }
 
 export function pendingUserInputToViewModel(
   interaction: PendingInteraction & { payload: UserInputRequestPayload },
 ): V4UserInputViewModel {
+  const inputMeta =
+    typeof interaction.payload.input === "object" && interaction.payload.input !== null
+      ? (interaction.payload.input as Record<string, unknown>)
+      : undefined;
+  const placeholder =
+    typeof inputMeta?.placeholder === "string" ? inputMeta.placeholder : undefined;
+  const prefill = typeof inputMeta?.prefill === "string" ? inputMeta.prefill : undefined;
+  const multiline = typeof inputMeta?.multiline === "boolean" ? inputMeta.multiline : undefined;
   return {
     interactionId: interaction.interactionId,
     prompt: interaction.payload.prompt,
     freeText: interaction.payload.freeText,
     sensitive: interaction.payload.sensitive,
+    ...(placeholder !== undefined ? { placeholder } : {}),
+    ...(prefill !== undefined ? { prefill } : {}),
+    ...(multiline !== undefined ? { multiline } : {}),
     options: interaction.payload.options ?? [],
   };
 }

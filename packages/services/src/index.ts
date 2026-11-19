@@ -430,3 +430,5 @@ export type {
   GroupNode,
   MoveGroupNode,
 } from "#src/task-groups/contract.js";
+
+export { IPiConfigService } from "#src/pi-config/contract.js";

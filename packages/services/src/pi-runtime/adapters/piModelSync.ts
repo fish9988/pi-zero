@@ -3,9 +3,16 @@
  */
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { ModelSelection } from "@zcode/shared";
-import type { SessionConfigState } from "@zcode/shared/zcode-protocol-v4";
+import type { ModelSelection, SessionLifecycleSnapshot } from "@zcode/shared";
+import type {
+  ConversationSnapshot,
+  ConversationTopicWireCandidate,
+  SessionConfigState,
+  SessionSummary,
+  WireConversationRow,
+} from "@zcode/shared/zcode-protocol-v4";
 import type { PiModelInfo } from "#src/pi-runtime/contract.js";
+import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import {
   getSupportedThinkingLevels,
   pickDefaultThinkingLevel,
@@ -17,6 +24,35 @@ import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
 import { preparePiSessionFileForSpawn } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
 
 const MODEL_NOT_FOUND_RE = /model not found/i;
+
+export interface PiSessionControllerCallbacks {
+  emitConversationFrame(frame: ConversationTopicWireCandidate): void;
+  onSessionPublishedOrUpdated(summary: SessionSummary): void;
+  onSessionLifecycleChanged(snapshot: SessionLifecycleSnapshot): void;
+  onSessionDeleted(sessionId: string): void;
+}
+
+export interface PiSessionControllerOptions {
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly workspacePath: string;
+  readonly workspaceIdentity?: string | undefined;
+  readonly cwd: string;
+  readonly parentSessionId?: string | undefined;
+  readonly modelSelection?: ModelSelection | undefined;
+  readonly thoughtLevel?: string | undefined;
+  readonly catalog: PiModelCatalog;
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly managedRuntimeDir?: string | undefined;
+  readonly hydratedFromDisk?:
+    | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
+    | undefined;
+  readonly readOnlyArchive?:
+    | { readonly snapshot: ConversationSnapshot; readonly rows: readonly WireConversationRow[] }
+    | undefined;
+  readonly callbacks: PiSessionControllerCallbacks;
+}
 
 export interface ResolvedModelTarget {
   readonly provider: string;
@@ -312,4 +348,50 @@ export function resolveInitialControllerConfig(input: {
     (model) => model.provider === config.provider && model.id === config.model,
   );
   return { config, contextWindowMax: matched?.contextWindow };
+}
+
+/** 取消活跃客户端上的待处理扩展交互，并优雅清空队列/中止当前回合。 */
+export async function cancelClientInteractionsAndAbort(
+  client: PiRpcClient | null,
+  cancelledIds: readonly string[],
+): Promise<void> {
+  if (!client?.alive) return;
+  for (const id of cancelledIds) {
+    client.sendExtensionUiResponse({ id, cancelled: true });
+  }
+  await client.clearQueue().catch(() => {});
+  await client.abort().catch(() => {});
+}
+
+/** 查询当前工作区 Pi 动态注册的斜杠命令（优先复用活跃 client，否则起临时 `--no-session` 探针并在 finally 关闭）。 */
+export async function probeDynamicPiCommands(input: {
+  liveClient?: PiRpcClient | null | undefined;
+  cwd?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  platform?: NodeJS.Platform | undefined;
+  managedRuntimeDir?: string | undefined;
+}) {
+  if (input.liveClient?.alive) {
+    const res = await input.liveClient.getCommands().catch(() => ({ commands: [] }));
+    return res.commands;
+  }
+  const launch = await discoverPi({
+    env: input.env,
+    platform: input.platform,
+    managedRuntimeDir: input.managedRuntimeDir,
+  });
+  if (!launch) return [];
+  const effectiveCwd = input.cwd && existsSync(input.cwd) ? input.cwd : tmpdir();
+  const client = await PiRpcClient.spawn({
+    launch,
+    cwd: effectiveCwd,
+    env: input.env,
+    noSession: true,
+  });
+  try {
+    const res = await client.getCommands();
+    return res.commands;
+  } finally {
+    await client.closeAndWait(1_500).catch(() => {});
+  }
 }

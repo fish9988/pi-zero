@@ -105,6 +105,8 @@ export function AppearanceSectionContent({
 
   return (
     <>
+      <CustomAppearanceSettings resolvedMode={activePreviewMode} setTheme={setTheme} />
+
       <div className="min-w-0 space-y-3">
         <div>
           <h3 className="text-ui-lg font-semibold text-foreground">
@@ -304,8 +306,6 @@ export function AppearanceSectionContent({
           </div>
         </div>
       </div>
-
-      <CustomAppearanceSettings resolvedMode={activePreviewMode} setTheme={setTheme} />
     </>
   );
 }

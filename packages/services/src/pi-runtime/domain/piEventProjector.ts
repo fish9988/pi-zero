@@ -15,7 +15,15 @@ import {
   type V4ConversationFileChangesResult,
   type WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import type { PiRpcEvent } from "#src/pi-runtime/domain/piRpcTypes.js";
+import type {
+  PiExtensionUiResponsePayload,
+  PiRpcEvent,
+} from "#src/pi-runtime/domain/piRpcTypes.js";
+import {
+  drainPendingExtensionUiState,
+  resolvePendingExtensionUiState,
+  type ResolveInteractionAnswer,
+} from "#src/pi-runtime/domain/piExtensionUiBridge.js";
 import {
   clearQueueItems,
   enqueueQueueText,
@@ -23,7 +31,6 @@ import {
 } from "#src/pi-runtime/domain/piQueueProjector.js";
 import {
   appendGuidedWorkSegment,
-  buildModelChangeMarkerRow,
   buildPhaseTransitionPatch,
   buildTurnHeaderRow,
   buildUserInputRow,
@@ -40,8 +47,11 @@ import {
 import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import { reducePiStreamEvent } from "#src/pi-runtime/domain/piStreamEventReducer.js";
 import {
+  applyHydratedReplacementToState,
+  buildModelSwitchDeltas,
   buildTurnSettlementDeltas,
   resetTurnTransientTracking,
+  resolveTurnFileChangesResult,
   type PiProjectorRuntimeState,
 } from "#src/pi-runtime/domain/piTurnSettlement.js";
 
@@ -146,6 +156,7 @@ export class PiEventProjector {
       toolCallIdByContentIndex: new Map(),
       turnFileChanges: new Map(),
       fileChangesByTurnId: new Map(input.hydrated?.fileChangesByTurnId ?? []),
+      pendingExtensionUiById: new Map(),
       getRowById: (rowId) => this.getRowById(rowId),
     };
   }
@@ -450,75 +461,44 @@ export class PiEventProjector {
     nowMs: number;
     sourceCommandId?: string | undefined;
   }): ProjectionCommit | null {
-    const prev = this.state.snapshot.config;
-    const nextConfig: SessionConfigState = {
-      ...prev,
-      provider: input.provider,
-      model: input.model,
-      thought: input.thought,
-      thoughtLevels: [...input.thoughtLevels],
-      modelSelection: {
-        providerId: input.provider,
-        modelId: input.model,
-        ...(input.thought ? { options: { reasoningLevel: input.thought } } : {}),
-      },
-    };
-    const deltas: ConversationDelta[] = [];
-    const modelChanged = prev.provider !== input.provider || prev.model !== input.model;
-    if (modelChanged && this.allRows.length > 0 && input.provider && input.model) {
-      const markerRowId = ++this.state.nextRowId;
-      deltas.push({
-        op: "row.appended",
-        row: buildModelChangeMarkerRow({
-          rowId: markerRowId,
-          turnId: `turn_model_${markerRowId}`,
-          createdAt: input.nowMs,
-          createdAtSeq: this.state.snapshot.seq + 1,
-          fromProvider: prev.provider,
-          fromModel: prev.model,
-          toProvider: input.provider,
-          toModel: input.model,
-          toThought: input.thought,
-          sourceCommandId: input.sourceCommandId,
-        }),
-      });
-    }
-    const patch: StatePatch = {
-      config: nextConfig,
-      inputRouting: computeInputRouting(
-        this.state.snapshot.control.phase,
-        nextConfig.followupMode,
-        this.state.snapshot.queue,
-      ),
-    };
-    deltas.push({ op: "state.updated", patch });
-    return this.commitDeltas(deltas, true);
+    return this.commitDeltas(buildModelSwitchDeltas(this.state, this.allRows.length, input), true);
   }
 
   getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
-    const row = this.getRowById(target.rowId);
-    const turnId = row && row.kind === "turnHeader" ? row.turnId : target.entityId;
-    const stored = this.state.fileChangesByTurnId.get(turnId);
-    if (stored) return stored;
-    if (turnId === this.state.activeTurnId && this.state.turnFileChanges.size > 0) {
-      let additions = 0;
-      let deletions = 0;
-      const items: V4ConversationFileChangesResult["items"] = [];
-      for (const entry of this.state.turnFileChanges.values()) {
-        additions += entry.additions;
-        deletions += entry.deletions;
-        items.push({
-          path: entry.path,
-          additions: entry.additions,
-          deletions: entry.deletions,
-          writeCount: entry.writeCount,
-          toolNames: [...entry.toolNames],
-          patches: [...entry.patches],
-        });
-      }
-      return { files: items.length, additions, deletions, state: "active", items };
-    }
-    return { files: 0, additions: 0, deletions: 0, items: [] };
+    return resolveTurnFileChangesResult(this.state, target);
+  }
+
+  resolveExtensionUiInteraction(
+    interactionId: string,
+    answer: ResolveInteractionAnswer,
+  ): {
+    readonly response: PiExtensionUiResponsePayload;
+    readonly commit: ProjectionCommit | null;
+  } | null {
+    const res = resolvePendingExtensionUiState(this.state, interactionId, answer);
+    if (!res) return null;
+    return { response: res.response, commit: this.commitDeltas(res.deltas, true) };
+  }
+
+  drainPendingExtensionUiInteractions(): {
+    readonly cancelledIds: string[];
+    readonly commit: ProjectionCommit | null;
+  } {
+    const drained = drainPendingExtensionUiState(this.state);
+    return {
+      cancelledIds: drained.cancelledIds,
+      commit: drained.deltas.length > 0 ? this.commitDeltas(drained.deltas, true) : null,
+    };
+  }
+
+  replaceWithHydratedSession(hydrated: HydratedPiSessionResult, newLogEpoch: string): void {
+    applyHydratedReplacementToState(
+      this.state,
+      this.allRows,
+      this.rowIndexById,
+      hydrated,
+      newLogEpoch,
+    );
   }
 
   applyRename(title: string): ProjectionCommit | null {

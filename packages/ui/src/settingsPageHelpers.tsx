@@ -40,7 +40,6 @@ import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js"
 import { DataBaseDirControl } from "@/settings/DataBaseDirControl.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
-import { ProactiveSuggestionsSetting } from "@/settings/ProactiveSuggestionsSetting.js";
 import { PluginAutoRecommendationSetting } from "@/settings/PluginAutoRecommendationSetting.js";
 import { DynamicWorkflowModeSetting } from "@/settings/DynamicWorkflowModeSetting.js";
 import { normalizeInterfaceMode, type InterfaceMode } from "@/lib/interfaceMode.js";
@@ -144,8 +143,6 @@ export function GeneralSectionContent({
   notificationSoundEnabled,
   closeToTrayOnWindows,
   keepAwakeWhileRunning = false,
-  mobilePushEnabled = true,
-  onMobilePushEnabledChange = async () => {},
   desktopChromiumHardwareAccelerationEnabled = true,
   receivePreviewUpdates,
   autoDownloadAndInstallUpdates,
@@ -179,7 +176,6 @@ export function GeneralSectionContent({
   onDesktopChromiumHardwareAccelerationChange = async () => {},
   onReceivePreviewUpdatesChange,
   onAutoDownloadAndInstallUpdatesChange,
-  onOpenOnboardingDialog,
 }: {
   localePreference: LocalePreference;
   interfaceMode?: InterfaceMode;
@@ -237,7 +233,6 @@ export function GeneralSectionContent({
   onOpenOnboardingDialog: () => void;
 }) {
   const { intl } = useZCodeIntl();
-  const hasServices = Boolean(useOptionalServices());
   // 部分 SSR 单测会用精简 props 直接渲染本组件，新增终端设置项后旧 helper 未必同步传值。
   // 这里把运行时缺省值兜到“继承系统 profile”，避免 undefined.trim() 把无关测试打断。
   const [localTerminalFontFamily, setLocalTerminalFontFamily] = useState(terminalFontFamily);
@@ -413,7 +408,6 @@ export function GeneralSectionContent({
             </Select>
           }
         />
-        {hasServices ? <ProactiveSuggestionsSetting /> : null}
       </SettingsGroupCard>
 
       <SettingsGroupCard>
@@ -689,23 +683,6 @@ export function GeneralSectionContent({
             />
           }
         />
-        {isDesktop ? (
-          <SettingsRow
-            searchId="settings.mobilePush"
-            label={intl.formatMessage({ id: "settings.mobilePush" })}
-            description={intl.formatMessage({ id: "settings.mobilePushDescription" })}
-            control={
-              <Switch
-                aria-label={intl.formatMessage({ id: "settings.mobilePush" })}
-                data-testid="settings-mobile-push-switch"
-                checked={mobilePushEnabled}
-                onCheckedChange={(checked) => {
-                  void onMobilePushEnabledChange(checked);
-                }}
-              />
-            }
-          />
-        ) : null}
         {isWindowsDesktop || isLinuxDesktop ? (
           <SettingsRow
             searchId="settings.closeToTrayOnWindows"
@@ -768,21 +745,6 @@ export function GeneralSectionContent({
               onDataBaseDirChange={onDataBaseDirChange}
               onSelectDataBaseDir={onSelectDataBaseDir}
             />
-          }
-        />
-      </SettingsGroupCard>
-
-      <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.onboarding"
-          label={intl.formatMessage({ id: "settings.onboarding" })}
-          description={intl.formatMessage({
-            id: "settings.onboardingDescription",
-          })}
-          control={
-            <Button type="button" size="lg" variant="outline" onClick={onOpenOnboardingDialog}>
-              {intl.formatMessage({ id: "settings.onboardingOpen" })}
-            </Button>
           }
         />
       </SettingsGroupCard>

@@ -334,6 +334,11 @@ import {
   parseSelectionSideSlashCommand,
   type V4VisibleSlashCommand,
 } from "@/v4/slashCommands.js";
+import {
+  parsePiLocalSlashCommand,
+  PiConversationFloatingActions,
+  PiConversationOverlays,
+} from "@/pi-conversation/index.js";
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
@@ -3028,65 +3033,95 @@ export function SessionPane({
     [cliSlashCommandNames],
   );
 
-  // Plan 选中即开启标准 Composer 开关，不能等发送时解析文本；与 /side 共用本地操作入口。
-  const appSlashCommands = useMemo<AppSlashCommand[] | undefined>(() => {
-    if (readOnly) return undefined;
-    const reloadActions: AppSlashCommand[] = sessionId
-      ? [
-          {
-            value: "reload",
-            recovery: true,
-            description: intl.formatMessage({ id: "chat.slash.app.reload.description" }),
-            keywords: ["reload", "restart", "重启"],
-            run: taskRestart.restart,
-          },
-        ]
-      : [];
-    const planAction: AppSlashCommand = {
-      value: "plan",
-      description: intl.formatMessage({ id: "chat.slash.app.plan.description" }),
-      keywords: ["plan", "计划", "计划模式"],
-      run: () => handleDraftSwitchMode("plan"),
-    };
-    if (
-      !sessionId ||
-      !onOpenSelectionSideChat ||
-      !shouldOfferSideSlashCommand({
-        isDraft: sessionId === null,
-        selectionSideChat,
-        readOnly,
-        isMobileViewport: isMobileTextInputViewport,
-      })
-    ) {
-      return [...reloadActions, planAction];
+  const [piBtwOpen, setPiBtwOpen] = useState(false);
+  const [piBtwInitialQuestion, setPiBtwInitialQuestion] = useState<string | undefined>(undefined);
+  const [piTreeOpen, setPiTreeOpen] = useState(false);
+
+  const handlePiBtwOpenChange = useCallback((open: boolean, initialQuestion?: string) => {
+    setPiBtwOpen(open);
+    setPiBtwInitialQuestion(open ? initialQuestion : undefined);
+  }, []);
+
+  const handlePiExportHtml = useCallback(async () => {
+    const piService = baseWorkspaceServices.piConfigService;
+    if (!piService || !sessionId) {
+      toast(locale.startsWith("zh") ? "请先打开一个 Pi 会话再导出" : "Open a Pi session to export");
+      return;
     }
-    const openNewSelectionSideChat = () => {
-      void handleOpenSelectionSideConversation(undefined, true);
-    };
-    // 关键词固定同时包含中英文别名，任一 locale 下输入 side / btw / 辅助 都能搜到。
-    // `/btw` 是 `/side` 的等价别名，适配不同用户输入习惯，面板中各自独立展示。
-    const sharedKeywords = ["side", "btw", "side chat", "auxiliary", "辅助对话", "辅助", "侧边"];
-    const description = intl.formatMessage({ id: "chat.slash.app.side.description" });
+    try {
+      const res = await piService.runSessionAction({
+        op: "exportHtml",
+        workspacePath,
+        sessionId,
+      });
+      if (res.op === "exportHtml") {
+        const blob = new Blob([res.result.html], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = res.result.suggestedFileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        toast(
+          locale.startsWith("zh")
+            ? `已导出 HTML（${res.result.messageCount} 条消息）`
+            : `Exported HTML (${res.result.messageCount} messages)`,
+        );
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error));
+    }
+  }, [baseWorkspaceServices.piConfigService, locale, sessionId, workspacePath]);
+
+  const handlePiForkCurrent = useCallback(async () => {
+    const piService = baseWorkspaceServices.piConfigService;
+    if (!piService || !sessionId) {
+      toast(locale.startsWith("zh") ? "当前无活动会话可分叉" : "No active session to fork");
+      return;
+    }
+    try {
+      const res = await piService.runSessionAction({
+        op: "fork",
+        workspacePath,
+        sessionId,
+      });
+      if (res.op === "fork") {
+        toast(
+          locale.startsWith("zh")
+            ? `已分叉新会话：${res.result.title}`
+            : `Forked session: ${res.result.title}`,
+        );
+        onSessionCreated?.(res.result.sessionId);
+      }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error));
+    }
+  }, [baseWorkspaceServices.piConfigService, locale, onSessionCreated, sessionId, workspacePath]);
+
+  const handlePiRewound = useCallback(() => {
+    void taskRestart.restart();
+  }, [taskRestart.restart]);
+
+  // 严格只保留 Pi 原生支持的本地恢复命令 `/reload`，不再向 `/` 菜单注入非 Pi 命令（如 `/plan`、`/side`）。
+  const appSlashCommands = useMemo<AppSlashCommand[] | undefined>(() => {
+    if (readOnly || !sessionId) return undefined;
     return [
-      ...reloadActions,
-      planAction,
-      ...[
-        { value: "side", description, keywords: sharedKeywords, run: openNewSelectionSideChat },
-        { value: "btw", description, keywords: sharedKeywords, run: openNewSelectionSideChat },
-      ].filter((command) => !cliSlashCommandNames.has(command.value)),
+      {
+        value: "reload",
+        recovery: true,
+        description: intl.formatMessage({ id: "chat.slash.app.reload.description" }),
+        keywords: ["reload", "restart", "重启"],
+        run: taskRestart.restart,
+      },
     ];
-  }, [
-    taskRestart.restart,
-    cliSlashCommandNames,
-    handleDraftSwitchMode,
-    handleOpenSelectionSideConversation,
-    intl,
-    isMobileTextInputViewport,
-    onOpenSelectionSideChat,
-    readOnly,
-    selectionSideChat,
-    sessionId,
-  ]);
+  }, [intl, readOnly, sessionId, taskRestart.restart]);
+  void handleDraftSwitchMode;
+  void handleOpenSelectionSideConversation;
+  void onOpenSelectionSideChat;
+  void isMobileTextInputViewport;
+  void shouldOfferSideSlashCommand;
 
   const chatLoadingBlockedByInteraction = hasChatLoadingBlockingInteraction(
     snapshot?.pendingInteractions ?? [],
@@ -3971,6 +4006,37 @@ export function SessionPane({
       const slashCommand = parseV4VisibleSlashCommand(text, readyAttachments, {
         contextAttachmentCount,
       });
+      const piLocalSlash = parsePiLocalSlashCommand(
+        text,
+        readyAttachments.length > 0 || contextAttachmentCount > 0,
+      );
+      if (piLocalSlash) {
+        if (piLocalSlash.kind === "btw") {
+          handlePiBtwOpenChange(true, piLocalSlash.question || undefined);
+          return "sent" as const;
+        }
+        if (piLocalSlash.kind === "export") {
+          void handlePiExportHtml();
+          return "sent" as const;
+        }
+        if (piLocalSlash.kind === "tree") {
+          if (sessionId) setPiTreeOpen(true);
+          return "sent" as const;
+        }
+        if (piLocalSlash.kind === "fork") {
+          void handlePiForkCurrent();
+          return "sent" as const;
+        }
+        if (piLocalSlash.kind === "settings") {
+          setPendingSettingsSectionIntent(piLocalSlash.section ?? "general");
+          openSettingsTab();
+          return "sent" as const;
+        }
+        if (piLocalSlash.kind === "reload") {
+          void taskRestart.restart();
+          return "sent" as const;
+        }
+      }
 
       if (!draftProjectReady || !(await ensureDraftModelReadyForSend())) {
         return "blocked" as const;
@@ -4241,6 +4307,10 @@ export function SessionPane({
       availableSelectionSideSlashCommandNames,
       appSlashCommands,
       handleDraftSessionCreated,
+      handlePiBtwOpenChange,
+      handlePiExportHtml,
+      handlePiForkCurrent,
+      openSettingsTab,
       reportDraftCreated,
       handleOpenSelectionSideConversationWithPrompt,
       invalidateActiveHighspeedCard,
@@ -4250,6 +4320,7 @@ export function SessionPane({
       createSubmissionFromComposer,
       sessionId,
       settleCurrentQueueInputs,
+      taskRestart.restart,
       waitForDraftSession,
     ],
   );
@@ -6501,6 +6572,17 @@ export function SessionPane({
         />
       ) : null}
       {runtimeExitBanner}
+      <PiConversationOverlays
+        workspacePath={workspacePath}
+        sessionId={sessionId}
+        btwOpen={piBtwOpen}
+        btwInitialQuestion={piBtwInitialQuestion}
+        onBtwOpenChange={handlePiBtwOpenChange}
+        treeOpen={piTreeOpen}
+        onTreeOpenChange={setPiTreeOpen}
+        onForked={(newSessionId) => onSessionCreated?.(newSessionId)}
+        onRewound={handlePiRewound}
+      />
       {recoverableCommand ? (
         <PendingCommandRecoveryBanner
           entry={recoverableCommand}
@@ -6671,6 +6753,23 @@ export function SessionPane({
           onClosePane={onClosePane}
           workspaceBadge={workspaceBadge}
         />
+        {!readOnly ? (
+          // 放在对话区左上角（z-30），避开右上角 ConversationStatusPanel（更改/状态浮条）的点击区域；
+          // 分屏带有 workspaceBadge / onClosePane 时自动下移避让。
+          <div
+            className={cn(
+              "pointer-events-none absolute left-3 z-30 flex items-center",
+              workspaceBadge || onClosePane ? "top-11" : "top-2",
+            )}
+          >
+            <PiConversationFloatingActions
+              hasSession={Boolean(sessionId)}
+              onOpenBtw={() => handlePiBtwOpenChange(true)}
+              onOpenTree={() => setPiTreeOpen(true)}
+              onExportHtml={() => void handlePiExportHtml()}
+            />
+          </div>
+        ) : null}
 
         <div
           ref={conversationLayoutContainerRef}

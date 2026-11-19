@@ -14,6 +14,18 @@ modules:
     layers:
       adapters: .
     owner: runtime
+  # pi-config-protocol：Pi 1.5.2+ 共享配置、凭据状态、资源管理、本地用量与 24 条原生斜杠命令契约（浏览器安全）
+  - id: pi-config-protocol
+    roots:
+      - packages/shared/src/pi-config
+    managed: true
+    requires: []
+    publicEntrypoints:
+      - packages/shared/src/pi-config/index.ts
+      - packages/shared/src/pi-config/contract.ts
+    layers:
+      contract: .
+    owner: runtime
   # pi-runtime：原生 Pi（@earendil-works/pi-coding-agent v1.5.2+）CLI 发现、RPC 传输、V4 适配器与进程生命周期托管
   - id: pi-runtime
     roots:
@@ -21,6 +33,7 @@ modules:
     managed: true
     requires:
       - agent-crash-diagnostic
+      - pi-config-protocol
       - provider
       - rpc
       - services
@@ -36,6 +49,65 @@ modules:
       - domain
       - adapters
     owner: runtime
+  # pi-config：Pi 1.5.2+ 原生配置、只写凭据、资源包管理、本地用量与会话生态服务
+  - id: pi-config
+    roots:
+      - packages/services/src/pi-config
+    managed: true
+    requires:
+      - pi-config-protocol
+      - pi-runtime
+      - provider
+      - rpc
+      - services
+      - shared
+      - windows-runtime-host
+    publicEntrypoints:
+      - packages/services/src/pi-config/index.ts
+      - packages/services/src/pi-config/contract.ts
+    layers:
+      domain: domain
+      adapters: adapters
+    layerOrder:
+      - domain
+      - adapters
+    owner: runtime
+  # pi-settings-ui：9 分区 Pi 原生设置中心 UI（由 dev-settings 负责）
+  - id: pi-settings-ui
+    roots:
+      - packages/ui/src/settings/pi
+    managed: true
+    requires:
+      - pi-config-protocol
+      - provider
+      - services
+      - shared
+      - ui
+    publicEntrypoints:
+      - packages/ui/src/settings/pi/index.ts
+      - packages/ui/src/settings/pi/contract.ts
+    layers:
+      contract: contract.ts
+      ui: .
+    owner: settings
+  # pi-conversation-ui：Pi 原生对话生态 UI（24+ 斜杠命令、/btw、分支树/fork/rewindTo，由 dev-settings 负责）
+  - id: pi-conversation-ui
+    roots:
+      - packages/ui/src/pi-conversation
+    managed: true
+    requires:
+      - pi-config-protocol
+      - provider
+      - services
+      - shared
+      - ui
+    publicEntrypoints:
+      - packages/ui/src/pi-conversation/index.ts
+      - packages/ui/src/pi-conversation/contract.ts
+    layers:
+      contract: contract.ts
+      ui: .
+    owner: conversation
   - id: session-control
     roots: [ packages/session-control/src, packages/session-control/vitest.config.ts ]
     managed: true

@@ -38,7 +38,8 @@
     "./conversation-telemetry": "./src/conversation-telemetry/index.ts",
     "./conversation-telemetry/messageTelemetry": "./src/conversation-telemetry/messageTelemetry.ts",
     "./conversation-telemetry/providerTelemetryIdentity": "./src/conversation-telemetry/providerTelemetryIdentity.ts",
-    "./credential-security": "./src/credential-security/module.ts"
+    "./credential-security": "./src/credential-security/module.ts",
+    "./pi-config": "./src/pi-config/index.ts"
   },
   "scripts": {
     "lint": "oxlint",

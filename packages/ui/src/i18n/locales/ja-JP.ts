@@ -8940,6 +8940,15 @@ const jaJP: Record<string, string> = {
   "remoteSync.providers.error.sessionUnavailable": "リモート接続は利用できなくなりました",
   "remoteSync.providers.error.hostExecutionFailed": "このデバイスで同期を実行できませんでした",
   "remoteSync.providers.error.unknown": "不明なエラー",
+  "settings.sidebar.group.piCore": "Pi エンジンとモデル",
+  "settings.piRuntime.title": "Pi ランタイム",
+  "settings.piCredentials.title": "プロバイダーと認証情報",
+  "settings.modelsThinking.title": "モデルと思考",
+  "settings.piContext.title": "コンテキストとプロンプト",
+  "settings.piExtensions.title": "拡張・パッケージ・Skill",
+  "settings.piMcpTools.title": "MCP とツール",
+  "settings.piKeybindingsNetwork.title": "ショートカットとネットワーク",
+  "settings.usageAbout.title": "使用量と概要",
 };
 
 export default jaJP;

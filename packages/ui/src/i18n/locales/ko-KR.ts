@@ -8733,6 +8733,15 @@ const koKR: Record<string, string> = {
   "remoteSync.providers.error.sessionUnavailable": "원격 연결을 더 이상 사용할 수 없습니다",
   "remoteSync.providers.error.hostExecutionFailed": "이 기기에서 동기화를 실행할 수 없습니다",
   "remoteSync.providers.error.unknown": "알 수 없는 오류",
+  "settings.sidebar.group.piCore": "Pi 엔진 및 모델",
+  "settings.piRuntime.title": "Pi 런타임",
+  "settings.piCredentials.title": "공급자 및 자격 증명",
+  "settings.modelsThinking.title": "모델 및 추론",
+  "settings.piContext.title": "컨텍스트 및 프롬프트",
+  "settings.piExtensions.title": "확장, 패키지 및 Skill",
+  "settings.piMcpTools.title": "MCP 및 도구",
+  "settings.piKeybindingsNetwork.title": "단축키 및 네트워크",
+  "settings.usageAbout.title": "사용량 및 정보",
 };
 
 export default koKR;

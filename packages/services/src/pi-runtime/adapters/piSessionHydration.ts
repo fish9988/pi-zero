@@ -4,12 +4,23 @@
  * 严格零子进程：仅读取 `.jsonl` 文件或只读旧版 SQLite 存档，绝不拉起 Pi 子进程。
  */
 import { randomUUID } from "node:crypto";
-import { resolveWorkspaceKey, type ZCodeSessionInfo } from "@zcode/shared";
+import { Emitter } from "@zcode/rpc";
+import {
+  resolveWorkspaceKey,
+  type SessionLifecycleSnapshot,
+  type ZCodeSessionInfo,
+} from "@zcode/shared";
 import type {
+  CommandAck,
   ConversationSnapshot,
+  ConversationTopicWireCandidate,
   SessionSummary,
+  SessionsIndexTopicWireCandidate,
   WireConversationRow,
+  WorkspaceConfigTopicWireCandidate,
 } from "@zcode/shared/zcode-protocol-v4";
+import type { ZCodeAgentWorkspaceTarget } from "#src/zcode-agent/zcodeAgent.js";
+import type { TopicSubscriptionState } from "#src/pi-runtime/adapters/piFrameEncoder.js";
 import { createLegacyReadOnlyConversationSnapshot } from "#src/pi-runtime/domain/piArchiveSnapshotFactory.js";
 import {
   hydratePiJsonlSession,
@@ -203,5 +214,73 @@ export function buildReconciledSessionsResult(input: {
         ...(summary.lastOutcome ? { lastOutcome: summary.lastOutcome } : {}),
       };
     }),
+  };
+}
+
+export interface PiWorkspaceBucket {
+  readonly workspaceKey: string;
+  readonly workspacePath: string;
+  readonly workspaceIdentity: string | undefined;
+  readonly generation: number;
+  readonly identity: string;
+  readonly sessions: Map<string, PiSessionController>;
+  diskSessions: Map<string, PiDiskSessionRecord>;
+  readonly deletedSessionIds: Set<string>;
+  readonly hydratingDiskSessions: Map<string, Promise<PiSessionController | null>>;
+  readonly hydratingOpenSessions: Map<string, Promise<PiSessionController>>;
+  initialScanDone: boolean;
+  initialScanPromise: Promise<void> | null;
+  refreshPromise: Promise<void> | null;
+  refreshPending: boolean;
+  watcherDispose: (() => void) | null;
+  readonly deferredTimers: Set<ReturnType<typeof setTimeout>>;
+  disposed: boolean;
+  readonly conversationFrameEmitter: Emitter<ConversationTopicWireCandidate>;
+  readonly sessionsIndexFrameEmitter: Emitter<SessionsIndexTopicWireCandidate>;
+  readonly workspaceConfigFrameEmitter: Emitter<WorkspaceConfigTopicWireCandidate>;
+  readonly sessionLifecycleEmitter: Emitter<SessionLifecycleSnapshot>;
+  readonly sessionsIndexLogEpoch: string;
+  sessionsIndexSeq: number;
+  readonly sessionsIndexSubs: Map<string, TopicSubscriptionState>;
+  readonly workspaceConfigLogEpoch: string;
+  workspaceConfigSeq: number;
+  readonly workspaceConfigSubs: Map<string, TopicSubscriptionState>;
+  readonly commandAckCache: Map<string, CommandAck>;
+}
+
+export function createPiWorkspaceBucket(
+  target: ZCodeAgentWorkspaceTarget,
+  workspaceKey: string,
+  generation: number,
+): PiWorkspaceBucket {
+  return {
+    workspaceKey,
+    workspacePath: target.workspacePath,
+    workspaceIdentity: target.workspaceIdentity,
+    generation,
+    identity: `pi-ws-${randomUUID()}`,
+    sessions: new Map(),
+    diskSessions: new Map(),
+    deletedSessionIds: new Set(),
+    hydratingDiskSessions: new Map(),
+    hydratingOpenSessions: new Map(),
+    initialScanDone: false,
+    initialScanPromise: null,
+    refreshPromise: null,
+    refreshPending: false,
+    watcherDispose: null,
+    deferredTimers: new Set(),
+    disposed: false,
+    conversationFrameEmitter: new Emitter(),
+    sessionsIndexFrameEmitter: new Emitter(),
+    workspaceConfigFrameEmitter: new Emitter(),
+    sessionLifecycleEmitter: new Emitter(),
+    sessionsIndexLogEpoch: `pi-idx-${randomUUID()}`,
+    sessionsIndexSeq: 0,
+    sessionsIndexSubs: new Map(),
+    workspaceConfigLogEpoch: `pi-cfg-${randomUUID()}`,
+    workspaceConfigSeq: 0,
+    workspaceConfigSubs: new Map(),
+    commandAckCache: new Map(),
   };
 }

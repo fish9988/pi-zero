@@ -99,6 +99,16 @@ import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
 import {
+  PiContextSection,
+  PiCredentialsSection,
+  PiExtensionsSection,
+  PiKeybindingsNetworkSection,
+  PiMcpToolsSection,
+  PiModelsSyncBridge,
+  PiRuntimeSection,
+  PiUsageAboutSection,
+} from "@/settings/pi/index.js";
+import {
   SettingsSearch,
   SettingsSearchTargetContext,
   type SettingsSearchId,
@@ -1664,13 +1674,7 @@ export function SettingsPage({
                   onThemeChange={handleFooterThemeChange}
                   onSettingsButtonClick={onBack}
                   onUsageClick={handleOpenUsageSettings}
-                  onUpgradeClick={handleOpenCodingPlanUpgradeSettings}
-                  onLogin={onLogin}
-                  onLogout={onLogout}
                   settingsButtonMode="back"
-                  user={user}
-                  // 头像菜单是 WorkspaceSidebarFooter 的共享菜单，Settings 场景不能丢失桌面平台能力。
-                  // 之前这里没透传 isDesktop，导致同一个头像菜单在设置页缺少界面缩放入口。
                   isDesktop={isDesktop}
                 />
               </div>
@@ -1771,13 +1775,6 @@ export function SettingsPage({
                                       id: activeSectionMeta.titleBadgeId,
                                     })}
                                   </span>
-                                ) : null}
-                                {activeSection === "usage" ? (
-                                  <SettingsUsageProviderTabs
-                                    activeTab={usageActiveTab}
-                                    codingPlanSources={usageCodingPlanSources}
-                                    onTabChange={handleUsageTabSelect}
-                                  />
                                 ) : null}
                               </div>
                             </div>
@@ -2064,22 +2061,61 @@ export function SettingsPage({
                                 })
                               }
                             />
+                          ) : activeSection === "pi-runtime" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiRuntimeSection />
+                            </ServiceProvider>
+                          ) : activeSection === "pi-credentials" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiCredentialsSection />
+                            </ServiceProvider>
+                          ) : activeSection === "pi-context" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiContextSection
+                                workspacePath={activeWorkspacePath ?? captionWorkspacePath}
+                              />
+                            </ServiceProvider>
+                          ) : activeSection === "pi-extensions" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiExtensionsSection
+                                workspacePath={activeWorkspacePath ?? captionWorkspacePath}
+                              />
+                            </ServiceProvider>
+                          ) : activeSection === "pi-mcp-tools" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiMcpToolsSection
+                                workspacePath={activeWorkspacePath ?? captionWorkspacePath}
+                              />
+                            </ServiceProvider>
+                          ) : activeSection === "pi-keybindings-network" ? (
+                            <ServiceProvider services={localHostServices}>
+                              <PiKeybindingsNetworkSection
+                                isDesktop={Boolean(isDesktop)}
+                                workspacePath={activeWorkspacePath ?? captionWorkspacePath}
+                                workspaceIdentity={activeWorkspaceIdentity}
+                              />
+                            </ServiceProvider>
                           ) : activeSection === "shortcuts" ? (
                             <ShortcutSettingsSection isDesktop={Boolean(isDesktop)} />
                           ) : activeSection === "modelProvider" ? (
                             <ServiceProvider services={localHostServices}>
-                              {/* 模型配置属于本机全局事实源；激活远端 workspace 时也不能注入远端 Host。 */}
-                              <ModelProviderSection
-                                workspacePath={activeWorkspacePath ?? captionWorkspacePath ?? ""}
-                                connectivityWorkspacePath={
-                                  localModelProviderConnectivityWorkspacePath
-                                }
-                                connectivityWorkspaceRequired={isRemoteModelProviderWorkspace}
-                                pendingModelProviderTarget={pendingModelProviderTarget}
-                                onConsumePendingModelProviderTarget={() =>
-                                  setPendingModelProviderTarget(undefined)
-                                }
-                              />
+                              {/* 模型配置属于本机全局事实源；同步写入 ~/.pi/agent/models.json 并保留批量导入与多档思考编辑器。 */}
+                              <div className="space-y-6">
+                                <PiModelsSyncBridge
+                                  workspacePath={activeWorkspacePath ?? captionWorkspacePath}
+                                />
+                                <ModelProviderSection
+                                  workspacePath={activeWorkspacePath ?? captionWorkspacePath ?? ""}
+                                  connectivityWorkspacePath={
+                                    localModelProviderConnectivityWorkspacePath
+                                  }
+                                  connectivityWorkspaceRequired={isRemoteModelProviderWorkspace}
+                                  pendingModelProviderTarget={pendingModelProviderTarget}
+                                  onConsumePendingModelProviderTarget={() =>
+                                    setPendingModelProviderTarget(undefined)
+                                  }
+                                />
+                              </div>
                             </ServiceProvider>
                           ) : activeSection === "personalization" ? (
                             // 个性化指令编辑的是本机 ~/.zcode/AGENTS.md（Agent 实际读取的文件）。
@@ -2172,13 +2208,17 @@ export function SettingsPage({
                               onOpenTask={onOpenTask}
                             />
                           ) : activeSection === "usage" ? (
-                            <UsageStatsSection
-                              activeTab={usageActiveTab}
-                              providerSourcesLoading={usageProviderSettingsLoading}
-                              selectedCodingPlanSource={selectedUsageCodingPlanSource}
-                              workspaceIdentity={activeWorkspaceIdentity}
-                              workspacePath={activeWorkspacePath ?? undefined}
-                            />
+                            <ServiceProvider services={localHostServices}>
+                              <PiUsageAboutSection
+                                isDesktop={Boolean(isDesktop)}
+                                receivePreviewUpdates={receivePreviewUpdates}
+                                autoDownloadAndInstallUpdates={autoDownloadAndInstallUpdates}
+                                onReceivePreviewUpdatesChange={handleReceivePreviewUpdatesChange}
+                                onAutoDownloadAndInstallUpdatesChange={
+                                  handleAutoDownloadAndInstallUpdatesChange
+                                }
+                              />
+                            </ServiceProvider>
                           ) : activeSection === "subagents" ? (
                             <SubagentsSection
                               onManageModels={handleOpenModelProviderSettings}

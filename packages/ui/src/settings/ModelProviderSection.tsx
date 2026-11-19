@@ -408,8 +408,8 @@ export function ModelProviderSection({
     error: sharedSettingsError,
     update: updateSharedSettings,
   } = useSettings();
-  // 订阅界面总开关：关闭时套餐导航、卡片与购买入口一并隐藏；缺失按开启以兼容旧设置。
-  const subscriptionUiEnabled = sharedSettings?.subscriptionUiEnabled !== false;
+  // 本地 Pi 工作台彻底隐藏 Zhipu/Z.ai Coding Plan 商业订阅预设，聚焦自定义 Provider、/models 批量导入与多档思考编辑器。
+  const subscriptionUiEnabled = false;
   const authenticatedEnterpriseProducts = useEnterpriseCodingPlanProducts({
     enabled:
       codingPlanPurchaseTokenAuthenticatedByProviderId[

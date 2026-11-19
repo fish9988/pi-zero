@@ -242,8 +242,8 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
       continue;
     }
     if (entryType === "compaction") {
-      const turnId = activeTurnId ?? `turn_${turnCounter || 1}`;
       const rowId = ++nextRowId;
+      const turnId = activeTurnId ?? `turn_compact_${rowId}`;
       const tokensBefore =
         typeof entry["tokensBefore"] === "number" ? entry["tokensBefore"] : undefined;
       rows.push(
@@ -276,8 +276,8 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
     if (role === "system" || role === "toolResult") continue;
 
     if (role === "compactionSummary") {
-      const turnId = activeTurnId ?? `turn_${turnCounter || 1}`;
       const rowId = ++nextRowId;
+      const turnId = activeTurnId ?? `turn_compact_${rowId}`;
       const tokensBefore =
         typeof msg["tokensBefore"] === "number" ? msg["tokensBefore"] : undefined;
       rows.push(

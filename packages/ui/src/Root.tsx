@@ -299,9 +299,8 @@ function RootInner({
     codingPlanSubscriptionService: services.codingPlanSubscriptionService,
   });
   const [welcomeScreenOpenReason, setWelcomeScreenOpenReason] =
-    useState<WelcomeScreenOpenReason | null>(() =>
-      consumeZcodeJwtInvalidRestartMarker() ? "session-expired" : null,
-    );
+    useState<WelcomeScreenOpenReason | null>(null);
+  void consumeZcodeJwtInvalidRestartMarker;
   const [providerFamilyDomainMigrationComplete, setProviderFamilyDomainMigrationComplete] =
     useState(false);
   const loginEntryRequest = useZCodeStore((state) => state.loginEntryRequest);
@@ -598,10 +597,9 @@ function RootInner({
       rootProviderAvailability.hydrated || rootModelSelectionRead.state.status === "error",
   });
   const isWebRemoteControlRoot = Boolean(webRemoteControlWorkspaceSwitcher);
-  const providerAvailabilityLoginEntryGuardEnabled =
-    shouldEnableProviderAvailabilityLoginEntryGuard({
-      isWebRemoteControlRoot,
-    });
+  // 本地 Pi 桌面工作台不再弹出 Zhipu/ZCode 登录门禁，冷启动直达工作区。
+  const providerAvailabilityLoginEntryGuardEnabled = false;
+  void shouldEnableProviderAvailabilityLoginEntryGuard;
   const { startupCheckCompleted: providerAvailabilityStartupCheckCompleted } =
     useProviderAvailabilityLoginEntryGuard({
       enabled: providerAvailabilityLoginEntryGuardEnabled,
@@ -697,7 +695,7 @@ function RootInner({
     setDirectoryBrowserOpen(true);
   }, []);
   const handleReauthenticationRequired = useCallback(() => {
-    setWelcomeScreenOpenReason("session-expired");
+    // 本地 Pi 工作台不触发云端账号重登页。
   }, []);
   const {
     setWorkspaceActionError,
@@ -732,7 +730,7 @@ function RootInner({
     setOAuthError,
     setUser,
     onProviderFamilyDomainClearedAfterLogout: () => {
-      setWelcomeScreenOpenReason("logout-provider-required");
+      // 本地 Pi 工作台不触发登出后的云端登录页。
     },
     userId: user?.id,
     onOpenRemoteConnection: allowRemoteWorkspace ? handleOpenRemoteConnection : undefined,
@@ -1263,15 +1261,17 @@ function RootInner({
     if (!loginEntryRequest) {
       return;
     }
-    // 登录入口已从模态弹窗收敛为 WelcomeScreen。
-    // provider 连接请求仍要先退出首次启动引导语义，避免连接完成后误创建默认 workspace。
-    setWelcomeScreenOpenReason("provider-request");
-  }, [loginEntryRequest]);
+    // 本地 Pi 工作台不再弹出 Zhipu/ZCode 登录页；引导用户前往设置中的「Provider 与凭据」。
+    setPendingSettingsSectionIntent("pi-credentials");
+    tabStoreApi.getState().openSettingsTab();
+  }, [loginEntryRequest, tabStoreApi]);
 
-  // 登录入口不依赖会话；保持引用稳定，避免草稿更新穿透侧栏 memo。
   const handleOpenLoginEntry = useCallback(() => {
-    setWelcomeScreenOpenReason("manual-login");
-  }, []);
+    setPendingSettingsSectionIntent("pi-credentials");
+    tabStoreApi.getState().openSettingsTab();
+  }, [tabStoreApi]);
+  void handleOpenLoginEntry;
+  void handleLogout;
   const handleWelcomeScreenComplete = useCallback(
     async (reason: LoginCompleteReason) => {
       await refreshAppSettings();
@@ -1524,9 +1524,9 @@ function RootInner({
     onCreateTask: handleCreateTask,
     onOpenWorkspace: handleOpenWorkspace,
     allowOpenWorkspace,
-    onLogin: !user ? handleOpenLoginEntry : undefined,
-    onLogout: user ? handleLogout : undefined,
-    user,
+    onLogin: undefined,
+    onLogout: undefined,
+    user: null,
   };
 
   if (credentialRecovery.state) return <CredentialStoreRecovery recovery={credentialRecovery} />;
@@ -1667,9 +1667,9 @@ function RootInner({
                 allowRemoteWorkspace={allowRemoteWorkspace}
                 handleBackFromSettings={handleBackFromSettings}
                 handleOpenTaskFromSettings={handleOpenTaskFromSettings}
-                handleLogout={user ? handleLogout : undefined}
-                onLogin={!user ? handleOpenLoginEntry : undefined}
-                user={user}
+                handleLogout={undefined}
+                onLogin={undefined}
+                user={null}
                 reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
                 remoteWorkspaceRecoveryByWorkspaceKey={remoteWorkspaceRecoveryByWorkspaceKey}
                 remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}

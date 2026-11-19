@@ -29,6 +29,7 @@ import type {
 import type { PiAgentService, PiAgentServiceOptions } from "#src/pi-runtime/contract.js";
 import { createCommandAck } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
+import { probeDynamicPiCommands } from "#src/pi-runtime/adapters/piModelSync.js";
 import { buildDiskSummaryLegacySessionInfo } from "#src/pi-runtime/adapters/piSessionHydration.js";
 import { createPiUnsupportedAgentMethods } from "#src/pi-runtime/adapters/piUnsupportedMethods.js";
 import { PiWorkspaceHub, commandCacheKey } from "#src/pi-runtime/adapters/piWorkspaceHub.js";
@@ -470,5 +471,23 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     },
 
     disposeAllAndWait,
+
+    async getSessionFilePath(workspacePath, sessionId) {
+      return hub.getSessionFilePath({ workspacePath }, sessionId);
+    },
+
+    async reloadSessionAfterRewind(workspacePath, sessionId) {
+      await hub.reloadSessionAfterRewind({ workspacePath }, sessionId);
+    },
+
+    async listDynamicCommands(workspacePath) {
+      return probeDynamicPiCommands({
+        liveClient: hub.findLiveClientForWorkspace(workspacePath),
+        cwd: workspacePath,
+        env: options.env,
+        platform: options.platform,
+        managedRuntimeDir: options.managedRuntimeDir,
+      });
+    },
   };
 }

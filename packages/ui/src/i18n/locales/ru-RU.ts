@@ -8905,6 +8905,15 @@ const ruRU: Record<string, string> = {
   "remoteSync.providers.error.hostExecutionFailed":
     "Синхронизацию не удалось выполнить на этом устройстве",
   "remoteSync.providers.error.unknown": "Неизвестная ошибка",
+  "settings.sidebar.group.piCore": "Движок Pi и модели",
+  "settings.piRuntime.title": "Среда Pi",
+  "settings.piCredentials.title": "Провайдеры и ключи",
+  "settings.modelsThinking.title": "Модели и рассуждение",
+  "settings.piContext.title": "Контекст и промпты",
+  "settings.piExtensions.title": "Расширения, пакеты и Skills",
+  "settings.piMcpTools.title": "MCP и инструменты",
+  "settings.piKeybindingsNetwork.title": "Клавиши и сеть",
+  "settings.usageAbout.title": "Статистика и о программе",
 };
 
 export default ruRU;

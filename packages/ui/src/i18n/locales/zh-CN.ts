@@ -8719,6 +8719,15 @@ const zhCN: Record<string, string> = {
   "voiceInput.error.upstream_timeout": "语音识别超时，请重试。",
   "voiceInput.error.audio_limit_exceeded": "已达到单次录音时长上限，已保留识别到的文字。",
   "voiceInput.error.failed": "语音识别失败，请重试。",
+  "settings.sidebar.group.piCore": "Pi 引擎与模型",
+  "settings.piRuntime.title": "Pi 运行时",
+  "settings.piCredentials.title": "Provider 与凭据",
+  "settings.modelsThinking.title": "模型与思考",
+  "settings.piContext.title": "上下文与提示词",
+  "settings.piExtensions.title": "扩展、包与 Skill",
+  "settings.piMcpTools.title": "MCP 与工具",
+  "settings.piKeybindingsNetwork.title": "快捷键与高级网络",
+  "settings.usageAbout.title": "用量统计与关于",
   ...requestSecurityMessagesZhCN,
 };
 

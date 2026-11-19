@@ -62,6 +62,7 @@ import type { ISourceServerWorkspaceService } from "./source-server-workspace/so
 import type { ISourceServerManagementService } from "./source-server-management/sourceServerManagement.js";
 import type { IOnboardingRecordService } from "./onboarding/onboardingRecord.js";
 import type { IConversationShareService } from "./conversation-share/conversationShare.js";
+import type { IPiConfigService } from "#src/pi-config/contract.js";
 
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
@@ -146,4 +147,6 @@ export interface IServiceAccessor {
   readonly settingsSyncService: ISettingsSyncService;
   readonly feedbackService: IFeedbackService;
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
+  /** Pi 原生配置、凭据状态、资源管理、本地用量与会话生态服务（仅桌面本地 Host 提供）。 */
+  readonly piConfigService?: IPiConfigService;
 }

@@ -3,11 +3,19 @@ import { logger } from "@/logger.js";
 
 export type SettingsSectionId =
   | "general"
-  | "agentBehavior"
   | "appearance"
+  | "pi-runtime"
+  | "pi-credentials"
+  | "modelProvider"
+  | "pi-context"
+  | "pi-extensions"
+  | "pi-mcp-tools"
+  | "pi-keybindings-network"
+  | "usage"
+  // Legacy / dropped IDs kept in type union for backward-compatible callers and preference migration
+  | "agentBehavior"
   | "migration"
   | "browser"
-  | "modelProvider"
   | "remoteDevices"
   | "dataSync"
   | "personalization"
@@ -19,7 +27,6 @@ export type SettingsSectionId =
   | "projects"
   | "archives"
   | "shares"
-  | "usage"
   | "subagents"
   | "commands"
   | "hooks"
@@ -43,14 +50,27 @@ const SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY = "zcode-settings-model-provider-id-
 const SETTINGS_SECTION_INTENT_EVENT = "zcode:settings-section-intent",
   SETTINGS_LAST_SECTION_STORAGE_KEY = "zcode-settings-last-section";
 const HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
-  // 产品语义：定时任务是 workspace 主视图，不能再作为设置页分区出现。
-  // 注意：hooks 已是正式设置页分区，不在此列。
   "automations",
-  // 旧插件市场已迁出设置页；保留 id 只用于迁移历史偏好和旧调用。
   "plugins",
-  // 工作区搜索（.zcodeignore）设置入口先隐藏：规则文件仍生效并可手动编辑，
-  // 编辑页代码保留，放开时从这里移除即可。
+  "plugin",
+  "mcp",
+  "skill",
+  "commands",
   "workspaceFileSearch",
+  "shortcuts",
+  "personalization",
+  "agentBehavior",
+  "browser",
+  "remoteDevices",
+  "computerUse",
+  "dataSync",
+  "memory",
+  "subagents",
+  "hooks",
+  "shares",
+  "projects",
+  "archives",
+  "migration",
 ]);
 
 export interface SettingsSectionIntentEventDetail {
@@ -71,11 +91,18 @@ export interface SettingsModelProviderTarget {
 function isSettingsSectionId(value: string): value is SettingsSectionId {
   return (
     value === "general" ||
-    value === "agentBehavior" ||
     value === "appearance" ||
+    value === "pi-runtime" ||
+    value === "pi-credentials" ||
+    value === "modelProvider" ||
+    value === "pi-context" ||
+    value === "pi-extensions" ||
+    value === "pi-mcp-tools" ||
+    value === "pi-keybindings-network" ||
+    value === "usage" ||
+    value === "agentBehavior" ||
     value === "migration" ||
     value === "browser" ||
-    value === "modelProvider" ||
     value === "remoteDevices" ||
     value === "dataSync" ||
     value === "personalization" ||
@@ -87,7 +114,6 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "projects" ||
     value === "archives" ||
     value === "shares" ||
-    value === "usage" ||
     value === "subagents" ||
     value === "commands" ||
     value === "hooks" ||
@@ -106,7 +132,23 @@ export function resolveSettingsSection(
   section: SettingsSectionId,
   fallbackSection: SettingsSectionId = "general",
 ): SettingsSectionId {
-  if (section === "plugins") return "plugin";
+  if (
+    section === "plugins" ||
+    section === "plugin" ||
+    section === "skill" ||
+    section === "commands"
+  ) {
+    return "pi-extensions";
+  }
+  if (section === "mcp") {
+    return "pi-mcp-tools";
+  }
+  if (section === "personalization") {
+    return "pi-context";
+  }
+  if (section === "shortcuts" || section === "workspaceFileSearch") {
+    return "pi-keybindings-network";
+  }
   return isSettingsSectionEnabled(section) ? section : fallbackSection;
 }
 

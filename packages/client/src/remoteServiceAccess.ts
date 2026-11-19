@@ -64,6 +64,7 @@ import {
   IWindowProjectService,
   IWindowRemoteProjectService,
   IWindowProjectChangesService,
+  IPiConfigService,
   type WindowProjectDirectoryServices,
   type IServiceAccessor,
 } from "@zcode/services";
@@ -142,6 +143,7 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly settingsSyncService: ISettingsSyncService;
   readonly feedbackService: IFeedbackService;
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
+  readonly piConfigService: IPiConfigService;
 
   constructor(
     channelClient: IChannelClient,
@@ -378,6 +380,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.promptAttachmentTransferService = ProxyChannel.toService<IPromptAttachmentTransferService>(
       channelClient.getChannel(IPromptAttachmentTransferService.channelName),
+    );
+    this.piConfigService = ProxyChannel.toService<IPiConfigService>(
+      channelClient.getChannel(IPiConfigService.channelName),
     );
   }
 }

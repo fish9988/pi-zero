@@ -4,6 +4,7 @@
  */
 import type { IZCodeAgentService, ZCodeAgentSessionTarget } from "#src/zcode-agent/zcodeAgent.js";
 import type {
+  PiCommandInfo,
   PiExtensionUiResponsePayload,
   PiModelInfo,
   PiRpcEvent,
@@ -179,4 +180,10 @@ export interface PiAgentServiceOptions {
 
 export type PiAgentService = IZCodeAgentService & {
   disposeAllAndWait(): Promise<void>;
+  /** 内部协作辅助：获取会话当前绑定的 `.jsonl` 路径（若存在）。 */
+  getSessionFilePath?(workspacePath: string, sessionId: string): Promise<string | null>;
+  /** 内部协作辅助：在安全停掉子进程并截断 `.jsonl` 后重新水合会话控制器。 */
+  reloadSessionAfterRewind?(workspacePath: string, sessionId: string): Promise<void>;
+  /** 内部协作辅助：向活跃或临时 Pi 进程拉取动态 `get_commands` 列表。 */
+  listDynamicCommands?(workspacePath?: string): Promise<PiCommandInfo[]>;
 };

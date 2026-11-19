@@ -93,7 +93,16 @@ export {
   disposeAllPiProcesses,
   disposeAllPiProcessesAndWait,
   getActivePiProcessCount,
+  registerActivePiProcess,
+  unregisterActivePiProcess,
+  type DisposablePiProcess,
 } from "#src/pi-runtime/adapters/piProcessRegistry.js";
+
+export {
+  PiSessionIndexScanner,
+  encodePiSessionBucketDir,
+  normalizeWorkspacePathKey,
+} from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
 
 export { probePiRpcHandshake } from "#src/pi-runtime/adapters/piHandshakeProbe.js";
 

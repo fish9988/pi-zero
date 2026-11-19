@@ -219,6 +219,8 @@ export const ServiceChannels = {
   HighspeedCard: "highspeed-card",
   /** Onboarding 完成记录服务（本地持久化，后续上传服务器） */
   OnboardingRecord: "onboarding-record",
+  /** Pi 原生配置、凭据状态（只写不回传）、资源管理、本地用量与会话生态服务（仅桌面本地 Host，不进手机白名单） */
+  PiConfig: "pi-config",
 } as const;
 
 export type ServiceChannelName = (typeof ServiceChannels)[keyof typeof ServiceChannels];

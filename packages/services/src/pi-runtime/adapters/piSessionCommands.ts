@@ -502,10 +502,38 @@ export async function dispatchPiAuxCommand(
       return ack;
     }
 
-    case "stop": {
-      host.broadcastCommit(projector.markStopping());
+    case "resolveInteraction": {
+      const { interactionId, answer } = envelope.payload as CommandPayloadMap["resolveInteraction"];
+      const resolved = projector.resolveExtensionUiInteraction(interactionId, answer);
+      if (!resolved) {
+        return createCommandAck({
+          commandId: envelope.commandId,
+          status: "noop",
+          revisionAtDecision: projector.getRevision(),
+          reasonCode: "proto.alreadyResolved",
+        });
+      }
+      host.broadcastCommit(resolved.commit);
       const liveClient = host.getLiveClient();
       if (liveClient) {
+        liveClient.sendExtensionUiResponse(resolved.response);
+      }
+      return createCommandAck({
+        commandId: envelope.commandId,
+        status: "accepted",
+        revisionAtDecision: projector.getRevision(),
+      });
+    }
+
+    case "stop": {
+      host.broadcastCommit(projector.markStopping());
+      const drained = projector.drainPendingExtensionUiInteractions();
+      host.broadcastCommit(drained.commit);
+      const liveClient = host.getLiveClient();
+      if (liveClient) {
+        for (const id of drained.cancelledIds) {
+          liveClient.sendExtensionUiResponse({ id, cancelled: true });
+        }
         await liveClient.clearQueue().catch(() => {});
         await liveClient.abort().catch(() => {});
       } else {
@@ -558,7 +586,7 @@ export async function dispatchPiAuxCommand(
         status: "rejected",
         revisionAtDecision: projector.getRevision(),
         reasonCode: "guard.pi.commandUnsupported",
-        message: `Pi runtime does not support command "${envelope.type}" in M2`,
+        message: `Pi runtime does not support command "${envelope.type}"`,
       });
   }
 }

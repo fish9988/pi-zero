@@ -9206,6 +9206,15 @@ const enUS: Record<string, string> = {
   "voiceInput.error.audio_limit_exceeded":
     "The recording reached the maximum length. The recognized text was kept.",
   "voiceInput.error.failed": "Speech recognition failed. Try again.",
+  "settings.sidebar.group.piCore": "Pi Engine & Models",
+  "settings.piRuntime.title": "Pi Runtime",
+  "settings.piCredentials.title": "Providers & Credentials",
+  "settings.modelsThinking.title": "Models & Thinking",
+  "settings.piContext.title": "Context & Prompts",
+  "settings.piExtensions.title": "Extensions, Packages & Skills",
+  "settings.piMcpTools.title": "MCP & Tools",
+  "settings.piKeybindingsNetwork.title": "Keybindings & Network",
+  "settings.usageAbout.title": "Usage & About",
   ...requestSecurityMessagesEnUS,
 };
 

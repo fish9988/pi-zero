@@ -4,6 +4,7 @@
  */
 import type { ConversationDelta } from "@zcode/shared/zcode-protocol-v4";
 import type { PiRpcEvent } from "#src/pi-runtime/domain/piRpcTypes.js";
+import { mapPiExtensionUiRequestToInteraction } from "#src/pi-runtime/domain/piExtensionUiBridge.js";
 import {
   dequeueMatchingQueueItem,
   pauseQueueWithReason,
@@ -463,6 +464,36 @@ export function reducePiStreamEvent(
             },
           },
         ],
+      };
+    }
+    case "extension_ui_request": {
+      if (event.method === "setTitle" && typeof event.title === "string" && event.title.trim()) {
+        return {
+          bumpRevision: true,
+          deltas: [
+            {
+              op: "state.updated",
+              patch: { meta: { title: event.title.trim(), titleSource: "custom" } },
+            },
+          ],
+        };
+      }
+      const mapped = mapPiExtensionUiRequestToInteraction(
+        event,
+        nowMs,
+        state.activeTurnHeaderRowId,
+      );
+      if (!mapped) return null;
+      state.pendingExtensionUiById.set(mapped.meta.id, mapped.meta);
+      const nextPending = [
+        ...state.snapshot.pendingInteractions.filter(
+          (item) => item.interactionId !== mapped.interaction.interactionId,
+        ),
+        mapped.interaction,
+      ];
+      return {
+        bumpRevision: true,
+        deltas: [{ op: "state.updated", patch: { pendingInteractions: nextPending } }],
       };
     }
     case "agent_end":
