@@ -7,7 +7,6 @@ export { ProjectManagement } from "@/project-sidebar/ProjectManagement.js";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { TID_SIDEBAR } from "@zcode/shared/test-ids";
-import { remoteHostIdFromWorkspaceIdentity } from "@/project-sidebar/contract.js";
 import type {
   ProjectSidebarProps,
   VirtualProject,
@@ -18,7 +17,6 @@ import type {
 import { useProjectPinIntent } from "@/project-sidebar/useProjectPinIntent.js";
 import { ProjectTaskListContext } from "@/project-sidebar/ProjectTaskListContext.js";
 import { useWebRemoteControlStatus } from "@/hooks/useWebRemoteControlStatus.js";
-import { useProjectRemoteSync } from "@/project-sidebar/useProjectRemoteSync.js";
 import { useProjectConnectionDiagnostics } from "@/project-sidebar/useProjectConnectionDiagnostics.js";
 import { useWebRemoteControlFeatureEnabled } from "@/WebRemoteControlFeatureProvider.js";
 import { useProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
@@ -56,7 +54,6 @@ import { ProjectSidebarListHeader } from "@/project-sidebar/ProjectSidebarListHe
 import { ProjectSidebarNavigation } from "@/project-sidebar/ProjectSidebarNavigation.js";
 import { HomeOnlyWorkspaceRows } from "@/project-sidebar/HomeOnlyWorkspaceRows.js";
 import { WorkspaceSidebarFooter } from "@/WorkspaceSidebarFooter.js";
-import { SidebarBottomActivity } from "@/sidebar-activity/SidebarBottomActivity.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -69,6 +66,8 @@ export type {
   SidebarFileTreeOpenRequest,
   ProjectSidebarProps,
 } from "@/project-sidebar/contract.js";
+
+const EMPTY_REMOTE_ACTIONS = () => [];
 
 // 右侧面板显隐曾让所有项目的菜单和 Tooltip 重渲染；只隔离无关父更新，保留目录/context 订阅。
 export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) {
@@ -87,7 +86,6 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
     deviceNames,
   } = useProjectDirectory();
   const { tree, pin } = useProjectPinIntent(authoritativeTree);
-  const remoteSync = useProjectRemoteSync(directory);
   const diagnostics = useProjectConnectionDiagnostics(directory, props, hostReadErrors);
   const navigateToTask = useProjectTaskNavigation(props, tree, remoteService);
   useAppControlNavigation(props, tree, navigateToTask);
@@ -112,14 +110,6 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   // 入口条件：桌面、非手机远控壳、Host 提供服务；是否 Git 仓库交给弹窗空状态表达。
   const canManageWorktrees = Boolean(
     managedWorktreeService && props.isDesktop && !props.isWebRemoteControl,
-  );
-  // 当前任务只影响远端“创建项目”的默认设备；分组继承在点击时读，
-  // 避免本地会话/草稿切换让全部项目的菜单与 Tooltip 重渲染。
-  const hasActiveRemoteTask = useZCodeSessionStore((state) =>
-    Boolean(
-      props.workspaceIdentity &&
-      state.workspaces[props.workspaceIdentity.trim() || props.workspacePath]?.activeTaskId,
-    ),
   );
   const [remotePicker, setRemotePicker] = useState<RemoteProjectHost | null>(null);
   const { openFiles, openTaskFiles } = useProjectFileTree(props, directory, remoteService);
@@ -216,7 +206,7 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
       onReconnectRemoteWorkspace={props.onReconnectRemoteWorkspace}
       onEdit={setEditor}
       onViewFiles={openFiles}
-      remoteActions={remoteSync.actions}
+      remoteActions={EMPTY_REMOTE_ACTIONS}
       onOpenWorktrees={canManageWorktrees ? setWorktreeProject : undefined}
     />
   );
@@ -234,7 +224,7 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
     (providerId, funnelContext) => openCodingPlanUpgrade({ providerId, funnelContext }),
     [openCodingPlanUpgrade],
   );
-  const banner = useMemo(() => <SidebarBottomActivity />, []);
+  const banner = null;
   // 手机远控 home-only 没有 base attachment，也就没有项目契约；改用 relay 层工作区列表与重连入口。
   const homeOnlySwitcher = service ? undefined : props.webRemoteControlWorkspaceSwitcher;
   return (
@@ -318,7 +308,6 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                             stickyTarget={groupedSticky}
                             workspacePath={props.workspacePath}
                             workspaceIdentity={props.workspaceIdentity}
-                            onOpenAutomations={props.onOpenAutomations}
                             onCreate={(groupId) =>
                               action(() => start(undefined, undefined, groupId))
                             }
@@ -376,16 +365,11 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
               workspaceIdentity={props.workspaceIdentity}
               onCreateTask={props.onCreateTask}
               directory={directory}
-              defaultDeviceId={
-                hasActiveRemoteTask && props.workspaceIdentity
-                  ? (remoteHostIdFromWorkspaceIdentity(props.workspaceIdentity) ?? "local")
-                  : "local"
-              }
-              allowDeviceManagement={props.isDesktop === true}
+              defaultDeviceId="local"
+              allowDeviceManagement={false}
               projects={tree.projects}
               service={service}
               remoteService={remoteService}
-              onOpenRemoteWorkspace={props.onOpenRemoteWorkspace}
               onClose={() => setCreating(false)}
               onSaved={refresh}
             />
@@ -423,7 +407,6 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
               onOpenTask={onSelectTask}
             />
           ) : null}
-          {remoteSync.dialog}
         </aside>
       </SidebarTooltipProvider>
     </ProjectTaskListContext.Provider>

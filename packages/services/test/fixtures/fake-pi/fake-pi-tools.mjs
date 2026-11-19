@@ -106,6 +106,32 @@ export function buildToolScenarios(promptText) {
     ];
   }
 
+  if (promptText.includes("[mcp]")) {
+    return [
+      {
+        toolName: "mcp__exa__web_search_exa",
+        args: { query: "Pi coding agent RPC protocol v1.5.2", numResults: 2 },
+        partialOut: "Searching Exa web index...",
+        finalOut: JSON.stringify(
+          {
+            results: [
+              {
+                title: "Pi Coding Agent v1.5.2 RPC Protocol",
+                url: "https://example.com/pi-rpc",
+                snippet: "JSONL RPC protocol with streaming tool execution and extension UI.",
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        details: {},
+        isError: false,
+        durationMs: 48,
+      },
+    ];
+  }
+
   if (promptText.includes("[tool:error]")) {
     return [
       {

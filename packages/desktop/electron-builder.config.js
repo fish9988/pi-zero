@@ -4,7 +4,6 @@ import { readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
-import { HELPER_APP_NAME } from "@zcode/zcode-cua/broker/helperConstants";
 import { runCommand, runCommandAndReadStdout } from "../../scripts/spawn-command.mjs";
 import { loadBuiltinProviderConfig } from "../../scripts/builtin-provider-config.mjs";
 import { resolveBuildTimeConfig } from "../../scripts/build-time-config.mjs";
@@ -26,20 +25,11 @@ import {
 import { createWindowsPowerShellSecurityArgs } from "./scripts/powershell-command.mjs";
 import { writeWindowsUpdatePublisher } from "./scripts/windows-update-publisher.mjs";
 import {
-  isSharpRequiredByComputerUse,
-  verifyStagedSharp,
-} from "./scripts/sharp-package-assets.mjs";
-import { isRealComputerUseProducerInstalled } from "./scripts/computer-use-producer.mjs";
-import {
   MAC_ELECTRON_LANGUAGES,
   findMissingMacElectronLocales,
   resolveMacElectronFrameworkResourcesDir,
 } from "./scripts/mac-electron-locales.mjs";
-import { verifyStagedKoffi } from "./scripts/koffi-package-assets.mjs";
-import {
-  finalizePackagedWindowsCuaHelper,
-  resolveElectronBuilderWindowsTarget,
-} from "./scripts/windows-cua-helper-assets.mjs";
+import { resolveElectronBuilderWindowsTarget } from "./scripts/windows-cua-helper-assets.mjs";
 import {
   findDesktopNativePackageViolations,
   createDesktopNativePackagePrunePatterns,
@@ -76,8 +66,9 @@ const shouldEnableMacSigning =
   process.env.ZCODE_ENABLE_MAC_SIGN === "1" && Boolean(macSigningIdentity);
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const desktopPackageRoot = import.meta.dirname;
-// Computer Use Helper（macOS .app、Windows runtime）只随真实 producer 打包；开源占位包下跳过随包资源与校验。
-const shouldPackageComputerUseHelper = isRealComputerUseProducerInstalled({ desktopPackageRoot });
+// Pure local Pi desktop workbench: CUA Helper bundling disabled.
+const shouldPackageComputerUseHelper = false;
+const HELPER_APP_NAME = "ZCodeHelper.app";
 const HELPER_FILENAME = "zcode-browser-import-helper.exe";
 const runtimeModuleLookupRoots = [
   desktopPackageRoot,
@@ -231,20 +222,6 @@ function assertPackagedMacElectronLocales(context) {
   }
 }
 
-function assertPackagedCuaHelper(context) {
-  if (targetPlatform.os !== "darwin" || !shouldPackageComputerUseHelper) return;
-  const appPath = join(
-    context.appOutDir,
-    `${desktopProductIdentity.productName}.app`,
-    "Contents",
-    "Resources",
-    "cua-helper",
-    HELPER_APP_NAME,
-  );
-  if (!existsSync(appPath)) {
-    throw new Error(`Packaged ZCode is missing bundled Computer Use Helper: ${appPath}`);
-  }
-}
 const shouldEnableWindowsVsign =
   process.platform === "win32" && process.env.ZCODE_ENABLE_WINDOWS_SIGN === "1";
 const commandStdoutMaxBuffer = 64 * 1024 * 1024;
@@ -517,47 +494,6 @@ function assertPackagedNodePtyPrebuild(context) {
     throw new Error(`node-pty 预编译产物缺失: ${targetBinaryPath}`);
 }
 
-function assertPackagedCuaSharp(context) {
-  if (!isSharpRequiredByComputerUse({ desktopPackageRoot })) return;
-  const problems = [
-    [
-      "packages/browser-use-plugin",
-      verifyStagedSharp({
-        resourcesDir: resolvePackagedResourcesDir(context),
-        targetPlatform,
-        pluginRelativePath: "packages/browser-use-plugin",
-      }),
-    ],
-    [
-      "packages/zcode-cua-plugin",
-      verifyStagedSharp({
-        resourcesDir: resolvePackagedResourcesDir(context),
-        targetPlatform,
-        pluginRelativePath: "packages/zcode-cua-plugin",
-      }),
-    ],
-  ].flatMap(([pluginPath, pluginProblems]) =>
-    pluginProblems.map((problem) => `${pluginPath}: ${problem}`),
-  );
-  if (problems.length > 0) {
-    throw new Error(
-      `node_repl sharp runtime is incomplete in the packaged app:\n- ${problems.join("\n- ")}`,
-    );
-  }
-}
-
-function assertPackagedCuaKoffi(context) {
-  const problems = verifyStagedKoffi({
-    resourcesDir: resolvePackagedResourcesDir(context),
-    targetPlatform,
-  });
-  if (problems.length > 0) {
-    throw new Error(
-      `CUA plugin koffi runtime is incomplete in the packaged app:\n- ${problems.join("\n- ")}`,
-    );
-  }
-}
-
 function assertSignedWindowsHelper(context, relativeHelperPath) {
   if (context.electronPlatformName !== "win32" || !shouldEnableWindowsVsign) return;
   const helperPath = resolve(context.appOutDir, "resources", relativeHelperPath);
@@ -769,25 +705,13 @@ export default {
     runTimedSync("afterPack:assertPackagedNodePtyPrebuild", () =>
       assertPackagedNodePtyPrebuild(context),
     );
-    runTimedSync("afterPack:assertPackagedCuaSharp", () => assertPackagedCuaSharp(context));
-    runTimedSync("afterPack:assertPackagedCuaKoffi", () => assertPackagedCuaKoffi(context));
-    runTimedSync("afterPack:assertPackagedCuaHelper", () => assertPackagedCuaHelper(context));
     runTimedSync("afterPack:assertPackagedMacElectronLocales", () =>
       assertPackagedMacElectronLocales(context),
     );
-    if (actualWindowsTarget && shouldPackageComputerUseHelper) {
-      await runTimedAsync("afterPack:finalizePackagedWindowsCuaHelper", () =>
-        finalizePackagedWindowsCuaHelper({
-          resourcesDir: resolvePackagedResourcesDir(context),
-          targetPlatform: actualWindowsTarget,
-          electronVersion: desktopElectronVersion,
-        }),
-      );
+    if (context.electronPlatformName === "win32") {
       await runTimedAsync("afterPack:writeWindowsInstallManifest", () =>
         writeWindowsInstallManifest(context),
       );
-    }
-    if (context.electronPlatformName === "win32") {
       // 普通打包没有 APP_DIR_* 宏；makensis 前落盘按架构的 helper define（见函数注释）。
       await writeInstallerProcessHelperDefine(
         context,
@@ -912,18 +836,7 @@ export default {
         ]
       : []),
     {
-      // agent 运行时资产，打包到 resources/glm。
-      // 桌面端内置的是 agent 的 JS bundle（glm/zcode.cjs，由 prepare:agent-bundle 生成），
-      // Host 进程用 app 自带的 Electron Node runtime（ELECTRON_RUN_AS_NODE）执行 `zcode.cjs app-server --stdio`，
-      // 不再随包内置独立 Node 二进制。远端 SSH/WSL 仍走原生二进制（无 Electron）。
-      from: `bundled-agents/${targetPlatform.key}/glm`,
-      to: "glm",
-      filter: ["**/*", "!**/*.map"],
-    },
-    {
-      // agent shell 之前完全依赖宿主系统 PATH，GUI 启动时经常拿不到用户自己装的 rg。
-      // 这里把 ripgrep 作为桌面端内置 runtime tool 打进 resources/tools，
-      // 后续 host/server 把该目录追加到 PATH；用户版本优先，缺失时再由随包 rg 兜底。
+      // Pure local Pi desktop workbench: legacy glm/zcode.cjs bundle removed; keep ripgrep + native search tools.
       from: `bundled-tools/${targetPlatform.key}/ripgrep`,
       to: "tools/ripgrep",
       filter: ["**/*"],

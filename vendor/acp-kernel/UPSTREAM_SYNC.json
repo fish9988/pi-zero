@@ -1,8 +1,0 @@
-{
-  "upstreamRepo": "ranxianglei/billion-context",
-  "requestedRef": "master",
-  "commitSha": "04ecbb42dd38543e9c407bd40eb773ae5ec8b60b",
-  "commitDate": "2026-11-19T05:22:34Z",
-  "kernelVersion": "0.0.199",
-  "syncedAt": "2026-11-19T05:29:15.337Z"
-}

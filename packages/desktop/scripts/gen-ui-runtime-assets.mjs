@@ -2,10 +2,7 @@ import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const source = new URL(
-  "../../../apps/zcode-cli/packages/visualize-plugin/skills/visualize/assets/",
-  import.meta.url,
-);
+const source = new URL("../assets/gen-ui/", import.meta.url);
 
 /** Inline 和导出共用实际资源文件，避免维护另一份有细节差异的运行时。 */
 export async function copyGenUiRuntimeAssets(destination) {

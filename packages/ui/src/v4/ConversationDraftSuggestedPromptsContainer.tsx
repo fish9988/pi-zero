@@ -48,7 +48,7 @@ import {
   type DraftSuggestedPluginOperation,
   trackDraftSuggestedPluginOperation,
 } from "@/v4/ConversationDraftSuggestedPluginFlow.js";
-import { useDraftSuggestedPromptItems } from "@/v4/useDraftSuggestedPromptItems.js";
+import { LOCAL_PI_CODING_SUGGESTED_PROMPTS } from "@/v4/featureSuggestedPrompts.js";
 import { useDraftSuggestedPluginActionPopover } from "@/v4/useDraftSuggestedPluginActionPopover.js";
 import { getComposerDraftRevision } from "@/v4/composer/composerDraftRevision.js";
 import { useComposerTextInsertApplied } from "@/v4/useComposerTextInsertApplied.js";
@@ -138,22 +138,17 @@ export function ConversationDraftSuggestedPromptsContainer({
   const activeOperationRef = useRef<DraftSuggestedPluginOperation | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
-  const allItems = useDraftSuggestedPromptItems({
-    clientScenesService: resolution.services.clientScenesService,
-    rpcReady: resolution.rpcReady,
-    workspaceKey,
-  });
   const items = useMemo(
     () =>
-      (proactive ? recommendedItems : allItems).filter(
+      (proactive ? recommendedItems : LOCAL_PI_CODING_SUGGESTED_PROMPTS).filter(
         (item) =>
           !item.actions?.some(
             (action) =>
               action === DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS ||
               action === DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS_OFFPEAK,
-          ) || Boolean(onOpenAutomations),
+          ),
       ),
-    [allItems, onOpenAutomations, proactive, recommendedItems],
+    [proactive, recommendedItems],
   );
   const {
     clearPluginActionPopover,

@@ -213,7 +213,6 @@ import {
   SourceServerUpgradeRequiredError,
 } from "./sourceServerConnectionManager.js";
 import { createSourceServerRecoveryCloseEvent } from "./sourceServerRecoveryPolicy.js";
-import { runStartupReconnectBatch } from "./sourceServerStartupReconnect.js";
 import {
   createSourceServerManagementService,
   type SourceServerManagementService,
@@ -4482,64 +4481,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           });
         logWindowHostTopology("base-attachment-ready");
         logger.info("local services ready, all channels registered");
-        // 服务就绪后请 Main 牵线扩展进程（首个就绪的 Window Host 会拉起它）。
-        windowHostExtensions.announceReady();
-        // URL Host 复用相同启动开关与 Registry；项目发现不创建 logical workspace/Agent。
-        void runStartupReconnectBatch({
-          getSettings: () => services.get(ISettingService).get(),
-          listCandidates: async () =>
-            (await services.get(IRemoteProjectService).readDirectory()).hosts.filter(
-              (host) => host.kind === "server",
-            ),
-          reconnect: (hosts) =>
-            Promise.all(
-              hosts.map(async (host) => {
-                try {
-                  await services.get(IRemoteProjectService).connectHost(host.id);
-                } catch (error) {
-                  logger.warn("URL Server startup reconnect failed", { hostId: host.id, error });
-                }
-              }),
-            ),
-        }).catch((error) => logger.warn("URL Server startup directory unavailable", error));
-
-        // Bug 原因：Directory 迁移属于远程附加能力，等待它完成会把本地 base attachment 的
-        // 首帧一起拖住。base ready 后再后台初始化；失败 flight 清空，用户显式连接仍可重试。
+        // Pure local Pi desktop workbench: skip Extension Host announceReady & remote startup reconnects.
         void sourceServerDirectory
           .initialize()
-          .then(async () =>
-            runStartupReconnectBatch({
-              getSettings: () => services.get(ISettingService).get(),
-              listCandidates: async () => {
-                const retained = new Set(
-                  (await services.get(IRemoteProjectService).readDirectory()).hosts.map(
-                    (host) => host.id,
-                  ),
-                );
-                return (await sourceServerDirectory!.listStartupReconnectCandidates()).filter(
-                  (candidate) => retained.has(remoteProjectHostIdForProfile(candidate.profile)),
-                );
-              },
-              reconnect: (candidates) =>
-                sourceServerConnectionManager!.reconnectOnStartup(candidates),
-            }),
-          )
-          .then((results) => {
-            const online = results.filter((result) => result.status === "online").length;
-            // Bug 原因：过去只记录失败计数，真实 Profile/reason 被吞掉，导致冷启动失败只能靠
-            // 手动重连再次触发。启动批次最多 3 个，逐项 warn 不会形成高频日志。
-            for (const result of results) {
-              if (result.status === "failed") {
-                logger.warn("Source Server startup reconnect failed", {
-                  profileId: result.profileId,
-                  error: result.error,
-                });
-              }
-            }
-            logger.info(
-              `Source Server startup reconnect finished, online=${online}, failed=${results.length - online}`,
-            );
-          })
           .catch((error) =>
             logger.warn(
               "Source Server directory initialization failed; local services remain available",

@@ -42,17 +42,11 @@ import {
   type StartExtensionDraft,
 } from "@/extension-slots/index.js";
 import { CommandCenterDialog } from "@/command-center/CommandCenterDialog.js";
-import { FeedbackHost } from "@/feedback/FeedbackHost.js";
-import { useFeedbackStore } from "@/feedback/feedbackStore.js";
 import {
   resolveQuickPickConversationNavigation,
   selectQuickPickConversationTaskIds,
 } from "@/lib/quickPickConversationNavigation.js";
-import {
-  setPendingSettingsPluginIntent,
-  setPendingSettingsSection,
-  type SettingsSectionId,
-} from "@/lib/settingsNavigation.js";
+import { setPendingSettingsSection, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 import { runWorkspaceVisibleCommand } from "@/lib/workspaceVisibleCommand.js";
 import { ZCODE_PRODUCT_DOCS_URL } from "@/lib/productDocs.js";
 import appLogoUrl from "@/assets/provider-icons/logo-zai.svg";
@@ -71,8 +65,6 @@ import { useTaskSidePaneMemoryBridge } from "@/app-shell/useTaskSidePaneMemoryBr
 import { resolveAppWorkspaceRpcTarget } from "@/app-shell/workspaceRpcTarget.js";
 import { useWorkspaceServicesResolution } from "@/hooks/useWorkspaceServices.js";
 import { useWorkspaceTerminalTaskNotifications } from "@/hooks/useTaskNotifications.js";
-import { useMarketingTaskCompletionRefresh } from "@/components/marketing-touch/useMarketingTaskCompletionRefresh.js";
-import { useOffPeakTaskNotifications } from "@/hooks/useOffPeakTaskNotifications.js";
 import type { AppProps, WorkspaceMainView } from "@/app-shell/types.js";
 import type {
   ChatSearchResultHighlightRequest,
@@ -104,7 +96,7 @@ const EMPTY_REMOTE_CONNECTION_LOGS: NonNullable<AppProps["remoteConnectionLogs"]
 
 export function App({
   services,
-  baseFeedbackService,
+  baseFeedbackService: _baseFeedbackService,
   onConnectRemote,
   onSelectRemoteProject,
   onCancelRemoteProject,
@@ -295,12 +287,6 @@ export function App({
   });
   const workspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
   const notificationEnabled = useZCodeStore((s) => s.notificationEnabled);
-  useMarketingTaskCompletionRefresh({
-    workspacePath: workspaceAbsPath,
-    ...(workspaceIdentity ? { workspaceIdentity } : {}),
-    ...(workspaceRemoteSessionId ? { endpointKey: workspaceRemoteSessionId } : {}),
-    rpcReady: workspaceRpcReady,
-  });
   useWorkspaceTerminalTaskNotifications({
     workspacePath: workspaceAbsPath,
     ...(workspaceIdentity ? { workspaceIdentity } : {}),
@@ -308,13 +294,6 @@ export function App({
     enabled: notificationEnabled,
     rpcReady: workspaceRpcReady,
     platform,
-    formatMessage: intl.formatMessage,
-  });
-  // 闲时任务终态/等确认通知：仅桌面本地链路，main 进程按 status:taskId 去重多窗口重复。
-  useOffPeakTaskNotifications({
-    offPeakTaskService: services.offPeakTaskService,
-    platform,
-    enabled: Boolean(notificationEnabled && isDesktop),
     formatMessage: intl.formatMessage,
   });
   const lastHandledDraftSidePaneCloseRef = useRef({
@@ -729,27 +708,8 @@ export function App({
   const handleOpenQuickPick = useCallback(() => {
     setIsQuickPickOpen((open) => !open);
   }, []);
-  const openFeedbackSubmit = useFeedbackStore((state) => state.openSubmit);
-  const openFeedbackTickets = useFeedbackStore((state) => state.openTickets);
   const isLoggedIn = Boolean(user);
-  const handleOpenFeedback = useCallback(() => {
-    void platform.openFeedback();
-  }, [platform]);
-
-  useEffect(() => {
-    // 内置反馈中心合并了"提交反馈 / 我的反馈"两个 Tab，
-    // 老的 OpenTicketsPanel IPC 仍然兼容（直接打开列表），未来如果还需要单独入口可以复用。
-    const disposeFeedbackDialog = platform.onOpenFeedbackDialog?.(() => {
-      openFeedbackSubmit();
-    });
-    const disposeTicketsPanel = platform.onOpenTicketsPanel?.(() => {
-      openFeedbackTickets();
-    });
-    return () => {
-      disposeFeedbackDialog?.();
-      disposeTicketsPanel?.();
-    };
-  }, [openFeedbackSubmit, openFeedbackTickets, platform]);
+  const handleOpenFeedback = useCallback(() => {}, []);
   const handleOpenCommunity = useCallback(() => platform.openCommunity(), [platform]);
   const handleOpenProductDocs = useCallback(() => {
     platform.openExternal(ZCODE_PRODUCT_DOCS_URL);
@@ -1122,19 +1082,17 @@ export function App({
           openWorkspace: () => runVisibleWorkspaceCommand(onOpenWorkspace),
           openSettings: openSettingsTab,
           openSkillsSettings: () => {
-            setPendingSettingsPluginIntent("skills");
-            openSettingsTab();
+            handleOpenSettingsSection("pi-extensions");
           },
           openMcpSettings: () => {
-            setPendingSettingsPluginIntent("mcps");
-            openSettingsTab();
+            handleOpenSettingsSection("pi-mcp-tools");
           },
           switchTheme: handleSwitchTheme,
           openFeedback: handleOpenFeedback,
           openCommunity: handleOpenCommunity,
           openProductDocs: handleOpenProductDocs,
-          login: onLogin,
-          logout: onLogout,
+          login: undefined,
+          logout: undefined,
           toggleSidebar: () => runVisibleWorkspaceCommand(handleToggleSidebar),
           toggleTerminal: () => runVisibleWorkspaceCommand(handleToggleTerminalIfWritable),
           togglePreview: () => runVisibleWorkspaceCommand(handleToggleBrowser),
@@ -1171,8 +1129,6 @@ export function App({
       isSidebarVisible,
       newTaskShortcutLabel,
       handleCreateTaskIfWritable,
-      onLogin,
-      onLogout,
       onOpenWorkspace,
       runVisibleWorkspaceCommand,
       openSettingsTab,
@@ -1235,9 +1191,6 @@ export function App({
         onSearchResultHighlightRequest={handleSearchResultHighlightRequest}
         onOpenCodeViewer={handleOpenCodeViewerIfWritable}
       />
-      {/* Bugfix: 反馈是应用级能力，必须固定走本机 base host；SSH session 连接中或断开时，
-          workspace-scoped services 会切成断连代理，不能让反馈提交跟随远程 session 失效。 */}
-      <FeedbackHost feedbackService={baseFeedbackService} platform={platform} />
       <PluginUiWorkspaceProvider onOpenSidePane={handleOpenPluginUi}>
         {/* 扩展视图标签的打开入口：启动页条目与能力 views.open（docs/plugins/extension-host.md §8）。 */}
         <ExtensionViewsProvider

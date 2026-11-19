@@ -243,7 +243,7 @@ export function WorkspaceHeaderTitleSection({
   const isRemoteWorkspace = Boolean(
     remoteWorkspaceHostLabel || workspaceIdentity?.trim() || remoteSessionId,
   );
-  // 同步入口打开数据同步弹窗：设备取自 tab 的 workspace identity，MCP 按当前项目做 workspace 映射。
+  // 同步入口打开数据同步弹窗：本地 Pi 桌面工作台已下线跨设备数据同步。
   const dataSync = useDataSyncEntry();
   const dataSyncSourceServerId = resolveDataSyncEntrySourceServerId({
     workspacePath: workspaceAbsPath,
@@ -251,7 +251,9 @@ export function WorkspaceHeaderTitleSection({
     remoteTarget,
   });
   const dataSyncDeviceOnline = useDataSyncDeviceOnline(dataSyncSourceServerId);
-  const showDataSyncEntry = dataSync.available && Boolean(dataSyncSourceServerId);
+  const showDataSyncEntry = false;
+  void dataSync;
+  void dataSyncDeviceOnline;
   const workspaceActionLoading = reloadSessionPending;
   const workspaceActionLoadingTitle = intl.formatMessage({
     id: "appHeader.workspaceSessionActionLoading",

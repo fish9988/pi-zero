@@ -1,10 +1,6 @@
 packages:
   - apps/dev-docs
   - packages/*
-  - vendor/acp-kernel
-  - apps/zcode-cli
-  - apps/zcode-cli/packages/*
-  - apps/zcode-cli/tools/*
 supportedArchitectures:
   os:
     - current

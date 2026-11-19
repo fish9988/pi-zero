@@ -17,8 +17,12 @@ process.env.ZCODE_DATA_BASE_DIR = home;
 process.env.ZCODE_DESKTOP_HOME_DIR = home;
 const { createHttpServer } = await import("@zcode/server");
 const { createStdioServer } = await import("@zcode/server/stdio");
-const { createCoreHttpServer } =
-  await import("../../../../../zcode-server-cli/src/server-core/http.js");
+const createCoreHttpServer = async (
+  _services: unknown,
+  _options: Record<string, unknown>,
+): Promise<{ port: number; close: () => Promise<void> }> => {
+  throw new Error("@zcode/zcode-server-cli was removed in pure Pi desktop workbench");
+};
 const { exposeWindowHostAttachmentServices } =
   await import("../../../../src/host/windowHostAttachmentRpcPolicy.js");
 const { ServiceCollection, ICredentialService } = await import("@zcode/services");

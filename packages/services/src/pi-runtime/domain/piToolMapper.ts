@@ -117,6 +117,12 @@ export function parseMcpToolIdentity(
     const toolName = colonSlash[2]?.trim().slice(0, MCP_NAME_MAX_CHARS) ?? "";
     if (serverName && toolName) return { serverName, toolName };
   }
+  const singleUnderscore = /^mcp_([a-zA-Z0-9-]+)_(.+)$/i.exec(trimmed);
+  if (singleUnderscore) {
+    const serverName = singleUnderscore[1]?.trim().slice(0, MCP_NAME_MAX_CHARS) ?? "";
+    const toolName = singleUnderscore[2]?.trim().slice(0, MCP_NAME_MAX_CHARS) ?? "";
+    if (serverName && toolName) return { serverName, toolName };
+  }
   return undefined;
 }
 
@@ -295,7 +301,7 @@ export function extractPartialPiToolArgs(
   return normalizePiToolInput(rawToolName, partial, workspacePath);
 }
 
-/** 从 Pi `result` / `partialResult` 提取纯文本输出。 */
+/** 从 Pi `result` / `partialResult` 提取纯文本输出（兼容 MCP `text`/`resource`/`image`/JSON 块）。 */
 export function extractPiToolResultText(
   result:
     | {
@@ -308,14 +314,42 @@ export function extractPiToolResultText(
   const chunks: string[] = [];
   if (Array.isArray(result.content)) {
     for (const block of result.content) {
-      if (isPlainRecord(block) && block.type === "text" && typeof block.text === "string") {
+      if (typeof block === "string") {
+        if (block.length > 0) chunks.push(block);
+        continue;
+      }
+      if (!isPlainRecord(block)) continue;
+      if (block.type === "text" && typeof block.text === "string") {
         chunks.push(block.text);
+      } else if (block.type === "resource" && isPlainRecord(block.resource)) {
+        const resText = block.resource.text;
+        const resUri = block.resource.uri;
+        if (typeof resText === "string" && resText.length > 0) chunks.push(resText);
+        else if (typeof resUri === "string" && resUri.length > 0)
+          chunks.push(`[resource: ${resUri}]`);
+      } else if (block.type === "image") {
+        const mime = typeof block.mimeType === "string" ? block.mimeType : "image";
+        chunks.push(`[image: ${mime}]`);
+      } else {
+        try {
+          chunks.push(JSON.stringify(block, null, 2));
+        } catch {
+          // 忽略不可序列化对象。
+        }
       }
     }
   }
   if (chunks.length > 0) return chunks.join("\n");
   const fallbackOutput = result.details?.output;
-  return typeof fallbackOutput === "string" ? fallbackOutput : "";
+  if (typeof fallbackOutput === "string") return fallbackOutput;
+  if (isPlainRecord(result.details) && Object.keys(result.details).length > 0) {
+    try {
+      return JSON.stringify(result.details, null, 2);
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 /** 构造严格符合 `executionOutputPreviewSchema`（<= 4096 字符）的流式执行预览。 */

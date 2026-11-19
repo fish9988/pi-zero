@@ -240,6 +240,7 @@ export function buildToolCallRow(input: {
   assistantResponseId?: string | undefined;
   startedAt?: number | undefined;
   endedAt?: number | undefined;
+  display?: ToolCallRow["display"] | undefined;
 }): ToolCallRow {
   return {
     kind: "toolCall",
@@ -258,6 +259,7 @@ export function buildToolCallRow(input: {
     ...(input.parsedInput !== undefined ? { input: input.parsedInput } : {}),
     ...(typeof input.startedAt === "number" ? { startedAt: input.startedAt } : {}),
     ...(typeof input.endedAt === "number" ? { endedAt: input.endedAt } : {}),
+    ...(input.display ? { display: input.display } : {}),
   };
 }
 

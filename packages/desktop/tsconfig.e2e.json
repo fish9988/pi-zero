@@ -21,7 +21,6 @@
   "references": [
     { "path": "../shared" },
     { "path": "../ui" },
-    { "path": "../e2e-report" },
-    { "path": "../zcode-server-cli" }
+    { "path": "../e2e-report" }
   ]
 }

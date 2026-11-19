@@ -12,7 +12,12 @@ import {
   buildServerRemoteWorkspaceIdentity,
   remoteHostIdFromWorkspaceIdentity,
 } from "@zcode/shared";
-import { createCoreHttpServer } from "../../../../../zcode-server-cli/src/server-core/http.js";
+async function createCoreHttpServer(
+  _services: unknown,
+  _options: Record<string, unknown>,
+): Promise<{ port: number; close: () => Promise<void> }> {
+  throw new Error("@zcode/zcode-server-cli was removed in pure Pi desktop workbench");
+}
 
 const testHome = process.env.HOME;
 if (!testHome || basename(testHome) !== "url-server")

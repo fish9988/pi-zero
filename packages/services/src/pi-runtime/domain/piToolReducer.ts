@@ -14,6 +14,7 @@ import {
   extractPiToolResultText,
   mapPiToolName,
   normalizePiToolInput,
+  parseMcpToolIdentity,
 } from "#src/pi-runtime/domain/piToolMapper.js";
 import {
   closeOpenStreamingRows,
@@ -109,6 +110,7 @@ function createAndTrackToolCall(
   if (input.contentIndex !== undefined) {
     state.toolCallIdByContentIndex.set(input.contentIndex, input.toolCallId);
   }
+  const mcp = parseMcpToolIdentity(input.rawToolName);
   input.deltas.push({
     op: "row.appended",
     row: buildToolCallRow({
@@ -123,6 +125,9 @@ function createAndTrackToolCall(
       parsedInput: canonicalInput,
       assistantResponseId: state.currentResponseId,
       startedAt: input.startedAt,
+      ...(mcp
+        ? { display: { kind: "mcp_tool", serverName: mcp.serverName, toolName: mcp.toolName } }
+        : {}),
     }),
   });
   return tracked;

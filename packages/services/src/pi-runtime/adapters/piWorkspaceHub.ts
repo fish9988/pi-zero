@@ -40,6 +40,7 @@ import {
   diffDiskSessionSummaries,
   loadHydratedPiSessionFromDisk,
   mergePublishedSessionSummaries,
+  reloadRewoundPiSessionFromDisk,
   type PiWorkspaceBucket,
 } from "#src/pi-runtime/adapters/piSessionHydration.js";
 import { PiSessionIndexScanner } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
@@ -453,14 +454,14 @@ export class PiWorkspaceHub {
   ): Promise<void> {
     const bucket = this.getOrCreateWorkspace(target);
     const existing = bucket.sessions.get(sessionId);
+    const fallbackFilePath =
+      existing?.getSessionFilePath() ?? bucket.diskSessions.get(sessionId)?.file ?? null;
     if (existing) await existing.stopRuntime();
-    const record = await this.scanner.findBySessionId(sessionId, bucket.workspaceKey);
-    if (!record || bucket.disposed) return;
-    bucket.diskSessions.set(sessionId, record);
-    const loaded = await loadHydratedPiSessionFromDisk({
+    const loaded = await reloadRewoundPiSessionFromDisk({
       scanner: this.scanner,
-      record,
-      workspacePath: bucket.workspacePath,
+      bucket,
+      sessionId,
+      fallbackFilePath,
       catalog: this.catalog,
     });
     if (!loaded || bucket.disposed) return;

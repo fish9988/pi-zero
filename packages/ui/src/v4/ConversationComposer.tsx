@@ -213,7 +213,6 @@ import {
 } from "@/lib/conversationSelectionReference.js";
 import { deleteConversationAnnotationWithUndo } from "@/selection-comment/index.js";
 import { ConversationBackgroundWorkTrigger } from "@/v4/composer/ConversationBackgroundWorkTrigger.js";
-import { V4ComposerCuaEntry } from "@/v4/composer/V4ComposerCuaEntry.js";
 import {
   V4ComposerModeSwitch,
   V4ComposerModelControls,
@@ -2841,15 +2840,6 @@ function ConversationComposerImpl({
             admission={workspaceMcpAdmission}
           />
         ) : null}
-        {/* Bug 原因：附件画廊 rebase 曾整段覆盖 leadingActions，误删 staging 的 CUA 常驻入口。
-            入口自身继续负责平台、远程与设置可见性，不在 composer 重复判定。 */}
-        <V4ComposerCuaEntry
-          workspacePath={workspacePath}
-          workspaceIdentity={workspaceIdentity}
-          remoteSessionId={remoteSessionId}
-          isWebRemoteControl={isWebRemoteControl}
-          currentSessionBusy={canStop}
-        />
         <ConversationBackgroundWorkTrigger
           backgroundWorks={backgroundWorks ?? []}
           runningSubagentCount={runningSubagentCount}
@@ -2860,17 +2850,14 @@ function ConversationComposerImpl({
     ),
     [
       activeConfigPicker,
-      canStop,
       disabled,
       runtimeBlocked,
       draftConfig,
       handleConfigPickerOpenChange,
-      isWebRemoteControl,
       backgroundWorkOpenTarget,
       onOpenRunningBackgroundWorks,
       onSwitchMode,
       provider,
-      remoteSessionId,
       runningSubagentCount,
       sessionId,
       workspaceHookAdmission,

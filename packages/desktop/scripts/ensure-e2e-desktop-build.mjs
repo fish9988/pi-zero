@@ -30,8 +30,6 @@ const SYNC_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 export const E2E_DESKTOP_REQUIRED_OUTPUT_PATHS = [
   "out/main/index.js",
   "out/host/index.js",
-  "out/scheduler/index.js",
-  "out/extension-host/index.js",
   "out/preload/index.cjs",
   "out/preload/resourceManager.cjs",
   "out/renderer/index.html",

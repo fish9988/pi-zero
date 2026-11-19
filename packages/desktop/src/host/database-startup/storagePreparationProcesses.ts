@@ -95,8 +95,11 @@ export async function prepareSessionStorage(options: {
     workspaceKey: options.cwd,
     presentationSurface: "desktop",
   });
-  if (!command?.supportsStorageStartup || !command.storagePreparationEntry)
-    throw statusError("unsupported_runtime");
+  if (!command?.supportsStorageStartup || !command.storagePreparationEntry) {
+    // Pure Pi runtime stores sessions in ~/.pi/agent/sessions/**/*.jsonl without legacy zcode-cli SQLite migration.
+    options.report("ready", { databaseId: "session" });
+    return;
+  }
   const entry = command.storagePreparationEntry;
   await new Promise<void>((resolve, reject) => {
     const child = new Worker(entry, {

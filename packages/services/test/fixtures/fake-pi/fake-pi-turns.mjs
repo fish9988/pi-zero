@@ -309,6 +309,16 @@ export async function executeTurn(promptText, images, ctx) {
       "<!DOCTYPE html><html><head><title>交互式演示页</title></head><body><h1>Hello Artifact</h1></body></html>",
       "```",
     ].join("\n");
+  } else if (promptText.includes("[math]")) {
+    replyText = [
+      "Gaussian integral & Euler identity:",
+      "",
+      "Inline formula: $E = mc^2$ and $e^{i\\pi} + 1 = 0$.",
+      "",
+      "$$",
+      "\\int_0^{\\infty} e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}",
+      "$$",
+    ].join("\n");
   } else if (promptText.includes("[unicode]")) {
     replyText += " \u2028line-sep\u2029para-sep";
   }

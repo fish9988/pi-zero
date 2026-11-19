@@ -152,19 +152,68 @@ export async function loadHydratedPiSessionFromDisk(input: {
   workspacePath: string;
   catalog: PiModelCatalog;
 }): Promise<{ readonly filePath: string; readonly hydrated: HydratedPiSessionResult } | null> {
-  const rawContent = await input.scanner.readFullSessionFile(input.record.file);
+  return loadHydratedPiSessionFileFromDisk({
+    scanner: input.scanner,
+    filePath: input.record.file,
+    sessionId: input.record.sessionId,
+    fallbackCwd: input.record.cwd || input.workspacePath,
+    fallbackMtimeMs: input.record.modifiedAt,
+    catalog: input.catalog,
+  });
+}
+
+/** 按指定 `.jsonl` 文件路径直接离线水合（兼容首轮 `rewindTo` 后仅剩 1 行 header 的空壳会话）。 */
+export async function loadHydratedPiSessionFileFromDisk(input: {
+  scanner: PiSessionIndexScanner;
+  filePath: string;
+  sessionId: string;
+  fallbackCwd: string;
+  fallbackMtimeMs?: number | undefined;
+  catalog: PiModelCatalog;
+}): Promise<{ readonly filePath: string; readonly hydrated: HydratedPiSessionResult } | null> {
+  const rawContent = await input.scanner.readFullSessionFile(input.filePath);
   if (rawContent === null) return null;
   const snap = input.catalog.getSnapshot();
   const hydrated = hydratePiJsonlSession({
     rawContent,
-    fallbackSessionId: input.record.sessionId,
-    fallbackCwd: input.record.cwd || input.workspacePath,
-    fallbackMtimeMs: input.record.modifiedAt,
+    fallbackSessionId: input.sessionId,
+    fallbackCwd: input.fallbackCwd,
+    fallbackMtimeMs: input.fallbackMtimeMs ?? Date.now(),
     catalogModels: snap.models,
     defaultModel: snap.defaultModel,
     defaultThinkingLevel: snap.defaultThinkingLevel,
   });
-  return { filePath: input.record.file, hydrated };
+  return { filePath: input.filePath, hydrated };
+}
+
+/** 回退后重新加载会话：兼容末轮回退与首轮回退（1 行 header 空壳，不在侧栏索引里）。 */
+export async function reloadRewoundPiSessionFromDisk(input: {
+  scanner: PiSessionIndexScanner;
+  bucket: PiWorkspaceBucket;
+  sessionId: string;
+  fallbackFilePath: string | null;
+  catalog: PiModelCatalog;
+}): Promise<{ readonly filePath: string; readonly hydrated: HydratedPiSessionResult } | null> {
+  const record = await input.scanner.findBySessionId(input.sessionId, input.bucket.workspaceKey);
+  if (input.bucket.disposed) return null;
+  if (record) {
+    input.bucket.diskSessions.set(input.sessionId, record);
+    return loadHydratedPiSessionFromDisk({
+      scanner: input.scanner,
+      record,
+      workspacePath: input.bucket.workspacePath,
+      catalog: input.catalog,
+    });
+  }
+  input.bucket.diskSessions.delete(input.sessionId);
+  if (!input.fallbackFilePath) return null;
+  return loadHydratedPiSessionFileFromDisk({
+    scanner: input.scanner,
+    filePath: input.fallbackFilePath,
+    sessionId: input.sessionId,
+    fallbackCwd: input.bucket.workspacePath,
+    catalog: input.catalog,
+  });
 }
 
 /** 为不存在于 Pi `.jsonl` 磁盘索引的旧版 ZCode 历史会话构造只读存档快照（零子进程）。 */

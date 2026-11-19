@@ -219,6 +219,7 @@
     "apps/zcode-cli",
     "vendor/acp-kernel",
     "packages/zcode-cua",
+    "packages/desktop/assets/gen-ui",
     "docs/electron"
   ]
 }

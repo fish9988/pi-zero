@@ -72,9 +72,6 @@ import {
   getZCodeDataRootDir,
   normalizeRuntimeProcessEnv,
   setDataBaseDir,
-  migrateApplicationStorage,
-  resolveDefaultZCodeAgentCommand,
-  startupStorage,
 } from "@zcode/services/node";
 import {
   desktopMenuMessageIds,
@@ -89,7 +86,6 @@ import {
   ZCODE_UPDATE_FORCE_GATE_ENABLED,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
-  toZhOrEnLocale,
   TEST_ZCODE_ENDPOINT_ORIGIN,
   ZCODE_VERSION,
   buildZCodeEndpointUrls,
@@ -206,7 +202,7 @@ import {
   loadWindow,
   spawnHostProcess,
 } from "./desktopHostProcess.js";
-import { spawnCronScheduler, type CronSchedulerHandle } from "./desktopCronScheduler.js";
+import type { CronSchedulerHandle } from "./desktopCronScheduler.js";
 import { createExtensionHostSupervisor } from "#src/main/extensionHostSupervisor.js";
 import {
   clearOAuthRoutesForWindow,
@@ -723,23 +719,9 @@ const windowsCuaOperationIndicator = createWindowsCuaOperationIndicator({
   logger,
 });
 
-// 常驻 cron scheduler 进程句柄；app ready 后拉起，退出前销毁。
+// Pure local Pi desktop workbench: disable legacy Extension Host & Cron Scheduler processes.
 let cronScheduler: CronSchedulerHandle | null = null;
-// 全 App 唯一的扩展进程监管器（docs/plugins/extension-host.md §12.1）。
-// 先于任何窗口创建，以便登记每个 Window Host；扩展进程在首个 Window Host 就绪时才拉起。
-// 每次启动扩展进程前读一次设置页的网络出口（§18.1 H3）；读取发生在拉起时，晚于 mainSettingService 初始化。
-let extensionHostSupervisor: ReturnType<typeof createExtensionHostSupervisor> | null =
-  createExtensionHostSupervisor({
-    logger,
-    readNetworkSettings: async () => {
-      const settings = await mainSettingService.get();
-      return {
-        httpProxy: settings.httpProxy,
-        noProxy: settings.httpProxyNoProxy,
-        caCertPath: settings.httpProxyCaCertPath,
-      };
-    },
-  });
+let extensionHostSupervisor: ReturnType<typeof createExtensionHostSupervisor> | null = null;
 // host → main 的定时任务派发结果，转交给 scheduler 结算。经模块变量转发以避免 spawn 顺序耦合。
 function forwardCronRunResult(
   result: Parameters<CronSchedulerHandle["handleCronRunResult"]>[0],
@@ -757,11 +739,6 @@ function wakeCronScheduler(automationId: string): void {
 function wakeOffPeakScheduler(offPeakTaskId?: string): void {
   // 复用同一条 scheduler-wake 通道（tick 同时覆盖 cron 与 off-peak 分支），仅日志标签区分。
   cronScheduler?.wake(`offpeak:${offPeakTaskId ?? "sync"}`);
-}
-// 选一个本地 host 执行派发：本期本地 workspace 由任一本地窗口 host 的 createTask 按 path 拉起/复用 agent。
-function resolveCronDispatchHost(): ElectronUtilityProcess | null {
-  const first = windowHostProcessMap.values().next();
-  return first.done ? null : first.value;
 }
 const disposingHostProcessTimers = new WeakMap<
   ElectronUtilityProcess,
@@ -1128,26 +1105,7 @@ const webRemoteControlManager = createWebRemoteControlManager({
     webRemoteControlSharedHostAttachments.disposeRemoteSession(remoteSessionId),
 });
 webRemoteControlManagerRef.current = webRemoteControlManager;
-webRemoteControlManager.startNotifications();
-broadcastHub.onMobilePushRun = (run) => webRemoteControlManager.observeNotificationRun(run);
-// owner 必须在事件到达时同步确认；开关与 locale 由 MobilePushConnection 在确认后再异步读取。
-broadcastHub.onMobilePushEvent = (event) =>
-  webRemoteControlManager.sendNotification(event, () =>
-    mainSettingService.get().then(
-      (settings) => ({
-        enabled: settings.mobilePushEnabled !== false,
-        // 手机推送契约只有中英两套文案，非中文界面语言推英文。
-        locale: toZhOrEnLocale(settings.locale),
-      }),
-      () => {
-        logger.warn("[mobile-push] notification settings unavailable");
-        throw new Error("settings_unavailable");
-      },
-    ),
-  );
-app
-  .whenReady()
-  .then(() => powerMonitor.on("resume", () => void webRemoteControlManager.refreshNotifications()));
+// Pure local Pi desktop workbench: disable Web Remote Relay background push notifications.
 app.on("will-quit", () => webRemoteControlManager.disposeNotifications());
 
 let forceUpdateMainWindowCreationBlocked = false;
@@ -2342,19 +2300,8 @@ app.whenReady().then(async () => {
     markExplicitQuit("database-startup-exit");
     app.quit();
   });
-  onLocalDatabaseStartupReady(() => {
-    try {
-      cronScheduler = spawnCronScheduler({
-        hostProcessLocalEnv,
-        logger,
-        resolveDispatchHost: resolveCronDispatchHost,
-        // keep-awake 已改为纯设置驱动；计数上报保留给后续诊断/配额用途，不再联动 blocker。
-        onOffPeakActiveCountChanged: () => {},
-      });
-    } catch (error) {
-      logger.error("[cron-scheduler] failed to spawn scheduler process:", error);
-    }
-  });
+  // Pure local Pi desktop workbench: do NOT spawn background Cron Scheduler (Automations/Off-Peak).
+  onLocalDatabaseStartupReady(() => {});
 
   if (process.platform === "win32") {
     // 打包态必须与 NSIS 快捷方式使用同一 AUMID，否则 Shell 把它们当成不同应用。
@@ -2372,7 +2319,7 @@ app.whenReady().then(async () => {
   // Electron 的 net.request 只能在 app ready 后使用；灰度请求仍是旁路预热，不阻塞首个 Host。
   // 预热曾在读取持久化语言之前启动，X-Client-Language 会带默认语言并进入 1 小时缓存；
   // 必须在 currentApplicationLocale 确定之后再启动。
-  void desktopContextPromptRollout?.refresh();
+  // Pure local Pi desktop workbench: skip commercial cloud context prompt rollout fetch.
   installFinderOpenFolderWorkflow({
     platform: process.platform,
     locale: currentApplicationLocale,
@@ -2596,9 +2543,8 @@ app.whenReady().then(async () => {
     getDesktopSessionActivity: () => ({
       runningAgentSessionCount: getRunningAgentSessionCount(),
     }),
-    syncWebRemoteControlWorkspaces: (windowId, workspaces) => {
-      webRemoteControlManager.syncAvailableWorkspaces(windowId, workspaces);
-      void webRemoteControlManager.restorePreviouslyEnabled(windowId, workspaces);
+    syncWebRemoteControlWorkspaces: () => {
+      // Pure local Pi desktop workbench: disable Web Remote Relay workspace sync / auto-restore.
     },
     syncAppSettings: syncImmediateAppSettings,
     // 设置页置灰查询：monitor 带 stale 缓存，装完 AppIndicator 扩展重开设置页即可刷新。

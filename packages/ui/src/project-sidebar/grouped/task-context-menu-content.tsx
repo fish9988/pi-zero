@@ -29,7 +29,7 @@ export function GroupedTaskContextMenuContent({
   onOpenTaskPathInFileManager,
   onCopyText,
   onOpenProviderConfig,
-  onOpenTaskFeedback,
+  onOpenTaskFeedback: _onOpenTaskFeedback,
   disabledReason,
   archiveDisabledReason,
 }: {
@@ -210,10 +210,6 @@ export function GroupedTaskContextMenuContent({
         <span className="truncate">
           {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
         </span>
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={onOpenTaskFeedback}>
-        {intl.formatMessage({ id: "taskList.feedback" })}
       </ContextMenuItem>
     </ContextMenuContent>
   );

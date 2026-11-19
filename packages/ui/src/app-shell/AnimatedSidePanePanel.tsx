@@ -16,7 +16,6 @@ import {
 } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 import {
-  isRemoteWorkspaceIdentity,
   type BrowserViewScreenshotSurfacePreparePayload,
   type GitChangeSourceId,
 } from "@zcode/shared";
@@ -62,11 +61,9 @@ import { BackgroundBashOutputSidePane } from "@/app-shell/BackgroundBashOutputSi
 import { PlanDetailSidePane } from "@/app-shell/PlanDetailSidePane.js";
 import {
   usePluginUiPaneTarget,
-  PluginUiLauncherItems,
   PluginUiSidePane,
   SidePaneLauncherRow,
   useMarketPluginUi,
-  useOpenPluginUi,
 } from "@/plugin-ui/index.js";
 import {
   ExtensionLauncherSection,
@@ -118,7 +115,6 @@ import { getVisibleSidePaneTabs } from "@/lib/workspaceSidePane.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
   BugIcon,
-  ChevronRightIcon,
   FileDiffIcon,
   FolderOpenIcon,
   EarthIcon,
@@ -348,7 +344,7 @@ export function AnimatedSidePanePanel({
   onOpenDeveloperTools,
   onOpenFileManager,
   onNavigateFileManager,
-  onOpenPluginMarket,
+  onOpenPluginMarket: _onOpenPluginMarket,
   onCreateTask,
   onOpenTerminalTab,
   onOpenReviewTab,
@@ -467,7 +463,6 @@ export function AnimatedSidePanePanel({
   mobileOverlay?: boolean;
   mobileStacked?: boolean;
 }) {
-  const onOpenPluginUi = useOpenPluginUi();
   const pluginUiTarget = usePluginUiPaneTarget({
     workspacePath: workspaceAbsPath,
     workspaceIdentity,
@@ -555,11 +550,6 @@ export function AnimatedSidePanePanel({
     isMobileTextInputViewport,
     mobileOverlay,
   });
-  // Sites 面板是会话级 UI 插件，和辅助对话同样需要正式会话；远端工作区不支持插件面板。
-  const canOpenSites =
-    canOpenSelectionSideConversation &&
-    !workspaceRemoteSessionId &&
-    !isRemoteWorkspaceIdentity(workspaceIdentity ?? "");
   const sitesPluginUi = useMarketPluginUi({
     workspacePath: workspaceAbsPath,
     workspaceIdentity,
@@ -801,12 +791,15 @@ export function AnimatedSidePanePanel({
   };
   const openTabLauncherItems: OpenTabLauncherItem[] = resolveOpenTabLauncherItemIds({
     canOpenSelectionSideConversation,
-    canOpenSites,
+    canOpenSites: false,
     developerToolsEnabled,
     hasReviewTab,
     supportsEmbeddedBrowser,
   })
-    .filter((itemId) => !isOfficeMode || (itemId !== "terminal" && itemId !== "review"))
+    .filter(
+      (itemId) =>
+        itemId !== "sites" && (!isOfficeMode || (itemId !== "terminal" && itemId !== "review")),
+    )
     .map((itemId) => openTabLauncherItemById[itemId]);
   const closeSidePaneButton =
     isVisible && !mobileOverlay && onCloseSidePane ? (
@@ -846,50 +839,6 @@ export function AnimatedSidePanePanel({
               />
             ))}
           </div>
-          {/* 草稿已有真实预热 session；按正式 task 判断会隐藏整个插件入口。 */}
-          {pluginUiTarget.sessionId ? (
-            <>
-              <div aria-hidden="true" className="my-4 h-px w-24 self-center bg-border" />
-              <section className="min-w-0" data-testid="side-pane-ui-recommendations">
-                <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
-                  <h2 className="pl-2 text-ui-lg font-semibold text-foreground">
-                    {intl.formatMessage({ id: "settings.plugins.store.ui.title" })}
-                  </h2>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-foreground-subtle"
-                    data-testid="side-pane-plugin-market"
-                    onClick={() => {
-                      if (!onOpenPluginMarket) return;
-                      setMarketReturnTarget({
-                        workspaceKey,
-                        ownerId: sidePaneOwnerId ?? null,
-                        tabId: visibleActiveTabId,
-                      });
-                      onOpenPluginMarket();
-                    }}
-                  >
-                    {intl.formatMessage({ id: "sidePane.launcher.viewAllPlugins" })}
-                    <ChevronRightIcon className="size-3.5" aria-hidden="true" />
-                  </Button>
-                </div>
-                <div className="mt-2 grid min-w-0 grid-cols-1 gap-x-8 gap-y-1 @min-[36rem]/launcher:grid-cols-2">
-                  {onOpenPluginUi ? (
-                    <PluginUiLauncherItems
-                      workspacePath={pluginUiTarget.workspacePath}
-                      workspaceIdentity={pluginUiTarget.workspaceIdentity}
-                      remoteSessionId={pluginUiTarget.remoteSessionId ?? undefined}
-                      sessionId={pluginUiTarget.sessionId}
-                      paneId={pluginUiTarget.paneId}
-                      onOpenPluginUi={onOpenPluginUi}
-                    />
-                  ) : null}
-                </div>
-              </section>
-            </>
-          ) : null}
           {/* 扩展分区不依赖会话（docs/plugins/extension-host.md §6）；没有要显示的行时不渲染。 */}
           <ExtensionLauncherSection
             workspacePath={pluginUiTarget.workspacePath}
