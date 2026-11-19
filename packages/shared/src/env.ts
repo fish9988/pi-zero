@@ -72,31 +72,31 @@ export const ZCODE_TELEMETRY_REPORT_ENDPOINT: string =
 export const ZCODE_AUTO_UPDATE_ENABLED: boolean =
   typeof __ZCODE_AUTO_UPDATE_ENABLED__ !== "undefined" ? __ZCODE_AUTO_UPDATE_ENABLED__ : false;
 
-/** 桌面自动更新源：`manifest` 走服务端 manifest 接口，`github` 走 fork 的 GitHub Releases。 */
+/** 桌面自动更新源：Pi Zero 默认走 `github`（fish9988/pi-zero Releases）。 */
 export type ZCodeUpdateProvider = "manifest" | "github";
 
 export function normalizeZCodeUpdateProvider(value: string | undefined): ZCodeUpdateProvider {
-  return value?.trim().toLowerCase() === "github" ? "github" : "manifest";
+  return value?.trim().toLowerCase() === "manifest" ? "manifest" : "github";
 }
 
 export const ZCODE_UPDATE_PROVIDER: ZCodeUpdateProvider = normalizeZCodeUpdateProvider(
   typeof __ZCODE_UPDATE_PROVIDER__ !== "undefined" ? __ZCODE_UPDATE_PROVIDER__ : undefined,
 );
-/** `github` 模式下的 Release 所属仓库；未配置时为空串。 */
+/** `github` 模式下的 Release 所属仓库；默认指向 fish9988/pi-zero。 */
 export const ZCODE_UPDATE_GITHUB_OWNER: string =
-  typeof __ZCODE_UPDATE_GITHUB_OWNER__ !== "undefined" ? __ZCODE_UPDATE_GITHUB_OWNER__ : "";
+  typeof __ZCODE_UPDATE_GITHUB_OWNER__ !== "undefined" ? __ZCODE_UPDATE_GITHUB_OWNER__ : "fish9988";
 export const ZCODE_UPDATE_GITHUB_REPO: string =
-  typeof __ZCODE_UPDATE_GITHUB_REPO__ !== "undefined" ? __ZCODE_UPDATE_GITHUB_REPO__ : "";
-/** fork 无代码签名证书时，是否允许安装无 Authenticode 签名的 Windows 更新包。 */
+  typeof __ZCODE_UPDATE_GITHUB_REPO__ !== "undefined" ? __ZCODE_UPDATE_GITHUB_REPO__ : "pi-zero";
+/** 无代码签名证书时，是否允许安装无 Authenticode 签名的 Windows 更新包。 */
 export const ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS: boolean =
   typeof __ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS__ !== "undefined"
     ? __ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS__
-    : false;
-/** 启动前远端强制升级 gate 是否生效；fork 构建需要关闭，否则落后版本会直接退出。 */
+    : true;
+/** 启动前远端强制升级 gate 是否生效；Pi Zero 默认关闭，绝不请求旧 ZCode 强制升级接口。 */
 export const ZCODE_UPDATE_FORCE_GATE_ENABLED: boolean =
   typeof __ZCODE_UPDATE_FORCE_GATE_ENABLED__ !== "undefined"
     ? __ZCODE_UPDATE_FORCE_GATE_ENABLED__
-    : true;
+    : false;
 
 /** 将本地运行态与编译期 ZCODE_ENV 映射为 ARMS 控制台识别的上报环境标签 */
 export function mapZCodeEnvToArmsRumEnv(runtimeEnv: ZCodeRuntimeEnv): ArmsRumEnv {

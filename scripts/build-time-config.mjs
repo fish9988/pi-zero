@@ -12,15 +12,15 @@ export const PRIVATE_BUILD_DEFAULTS_PATH = resolve(
 );
 
 const ENABLED_VALUES = new Set(["1", "true", "yes"]);
-const DISABLED_VALUES = new Set(["0", "false", "no"]);
 
-/** 更新源：默认沿用服务端 manifest；`github` 用于 fork 自建分发（见 docs/desktop/fork-auto-update.md）。 */
+/** 更新源：Pi Zero 默认走 GitHub Releases（fish9988/pi-zero）；避免误连上游 ZCode 服务端。 */
 export const UPDATE_PROVIDER_MANIFEST = "manifest";
 export const UPDATE_PROVIDER_GITHUB = "github";
+export const DEFAULT_PI_ZERO_GITHUB_REPO = "fish9988/pi-zero";
 const UPDATE_PROVIDERS = new Set([UPDATE_PROVIDER_MANIFEST, UPDATE_PROVIDER_GITHUB]);
 
 function resolveUpdateProvider(rawValue) {
-  const value = rawValue.trim().toLowerCase() || UPDATE_PROVIDER_MANIFEST;
+  const value = rawValue.trim().toLowerCase() || UPDATE_PROVIDER_GITHUB;
   if (!UPDATE_PROVIDERS.has(value)) {
     throw new Error(
       `invalid ZCODE_UPDATE_PROVIDER=${rawValue}; expected ${[...UPDATE_PROVIDERS].join(" or ")}`,
@@ -33,8 +33,8 @@ function resolveUpdateProvider(rawValue) {
  * `owner/repo` 必须能在构建期完整解析，否则产物里的 app-update.yml 会指向一个无效仓库，
  * 客户端只会在运行时反复刷新失败。
  */
-function resolveUpdateGithubRepository(rawValue, { required }) {
-  const value = rawValue.trim();
+function resolveUpdateGithubRepository(rawValue, { required, explicit }) {
+  const value = rawValue.trim() || (required && !explicit ? DEFAULT_PI_ZERO_GITHUB_REPO : "");
   if (!value) {
     if (required) {
       throw new Error("ZCODE_UPDATE_GITHUB_REPO is required when ZCODE_UPDATE_PROVIDER=github");
@@ -75,10 +75,17 @@ export async function resolveBuildTimeConfig(
 ) {
   const defaults = await readPrivateDefaults(defaultsPath);
   const updateProvider = resolveUpdateProvider(pickValue(env, defaults, "ZCODE_UPDATE_PROVIDER"));
+  const hasExplicitGithubRepo =
+    typeof env.ZCODE_UPDATE_GITHUB_REPO === "string" ||
+    typeof defaults.ZCODE_UPDATE_GITHUB_REPO === "string";
   const updateGithubRepository = resolveUpdateGithubRepository(
     pickValue(env, defaults, "ZCODE_UPDATE_GITHUB_REPO"),
-    { required: updateProvider === UPDATE_PROVIDER_GITHUB },
+    { required: updateProvider === UPDATE_PROVIDER_GITHUB, explicit: hasExplicitGithubRepo },
   );
+  const allowUnsignedRaw = pickValue(env, defaults, "ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS").toLowerCase();
+  const updateAllowUnsignedWindows = allowUnsignedRaw
+    ? ENABLED_VALUES.has(allowUnsignedRaw)
+    : updateProvider === UPDATE_PROVIDER_GITHUB;
   return {
     armsRumEndpoint: pickValue(env, defaults, "ZCODE_ARMS_RUM_ENDPOINT"),
     telemetryReportEndpoint: pickValue(env, defaults, "ZCODE_TELEMETRY_REPORT_ENDPOINT"),
@@ -88,12 +95,10 @@ export async function resolveBuildTimeConfig(
     updateProvider,
     updateGithubOwner: updateGithubRepository.owner,
     updateGithubRepo: updateGithubRepository.repo,
-    // fork 没有代码签名证书，需要显式打开才能安装无签名更新包；默认保持上游的强制签名校验。
-    updateAllowUnsignedWindows: ENABLED_VALUES.has(
-      pickValue(env, defaults, "ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS").toLowerCase(),
-    ),
-    // 强制升级 gate 默认开启；只有显式 0/false/no 才关闭，避免空字符串被误读成关闭。
-    updateForceGateEnabled: !DISABLED_VALUES.has(
+    // Pi Zero GitHub Releases 默认无 Authenticode 证书，github 模式下默认放行无签名更新包（sha512 仍强制校验）。
+    updateAllowUnsignedWindows,
+    // Pi Zero 独立发布，默认关闭指向旧 ZCode 服务端的强制升级 gate，只有显式 1/true/yes 才开启。
+    updateForceGateEnabled: ENABLED_VALUES.has(
       pickValue(env, defaults, "ZCODE_UPDATE_FORCE_GATE").toLowerCase(),
     ),
   };

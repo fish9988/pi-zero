@@ -2,10 +2,10 @@
 !include FileFunc.nsh
 
 !ifndef ZCODE_INSTALLER_DEFAULT_LOG_PATH
-  !define ZCODE_INSTALLER_DEFAULT_LOG_PATH "$TEMP\ZCode-installer.log"
+  !define ZCODE_INSTALLER_DEFAULT_LOG_PATH "$TEMP\PiZero-installer.log"
 !endif
 !ifndef ZCODE_INSTALLER_ELEVATED_LOG_PATH
-  !define ZCODE_INSTALLER_ELEVATED_LOG_PATH "$WINDIR\Logs\ZCode-installer.log"
+  !define ZCODE_INSTALLER_ELEVATED_LOG_PATH "$WINDIR\Logs\PiZero-installer.log"
 !endif
 !ifndef ZCODE_INSTALLER_IS_ELEVATED_INNER
   ; 修复原因：来源只在测试夹具模拟内层，正式默认恒假会让提权进程继续使用调用方 /LOG。
@@ -30,7 +30,7 @@
 !endif
 
 !ifndef ZCODE_UNINSTALLER_LOG_PATH
-  !define ZCODE_UNINSTALLER_LOG_PATH "$TEMP\ZCode-uninstaller.log"
+  !define ZCODE_UNINSTALLER_LOG_PATH "$TEMP\PiZero-uninstaller.log"
 !endif
 !ifndef ZCODE_UNINSTALLER_FUNCTION_PREFIX
   !define ZCODE_UNINSTALLER_FUNCTION_PREFIX "un."
@@ -333,7 +333,7 @@
     Pop $R2
     StrCmp $R1 "0" zcodePreviousProcessesStopped
     !insertmacro ZCodeReportInstallerStage "process-cleanup-failed exit-code=$R1 install-dir=$installationDir details=$R2"
-    !insertmacro ZCodeCleanupErrorMessage "无法验证或关闭旧版本进程，安装已停止。请关闭 ZCode 后重试。进程信息：$R2" "Cannot verify or close previous-version processes. Setup stopped. Close ZCode and retry. Process details: $R2"
+    !insertmacro ZCodeCleanupErrorMessage "无法验证或关闭旧版本进程，安装已停止。请关闭 Pi Zero 后重试。进程信息：$R2" "Cannot verify or close previous-version processes. Setup stopped. Close Pi Zero and retry. Process details: $R2"
     SetErrorLevel 2
     Quit
     zcodePreviousProcessesStopped:

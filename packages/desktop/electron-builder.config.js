@@ -276,7 +276,9 @@ const PACKAGING_PRUNE_PATTERNS = [
 
 function buildDesktopArtifactName(platformName, extension = "${ext}") {
   // 测试环境产物必须和正式安装包文件名区分，避免上传、下载或人工验收时混用。
-  return `\${productName}-\${version}-${platformName}-\${arch}${desktopArtifactEnvSuffix}.${extension}`;
+  // 文件名前缀去掉空格（如 PiZero-0.1.0-win-x64.exe），避免 GitHub Releases 把空格替换为点号导致 latest.yml URL 不一致。
+  const artifactPrefix = desktopProductIdentity.productName.replaceAll(" ", "");
+  return `${artifactPrefix}-\${version}-${platformName}-\${arch}${desktopArtifactEnvSuffix}.${extension}`;
 }
 
 function runAsarCommand(args) {
@@ -580,12 +582,13 @@ export default {
   // Linux deb 打包（fpm）会校验 package metadata 中的 homepage、author.email、maintainer。
   // CI 环境下若这些字段缺失会在产物阶段直接失败。这里统一在构建配置补齐，避免依赖外部注入。
   extraMetadata: {
+    name: desktopProductIdentity.linuxPackageName,
     version: buildMetadata.appVersion,
     zcodeProductFlavor: desktopProductIdentity.flavor,
-    homepage: "https://zcode.z.ai",
+    homepage: "https://github.com/fish9988/pi-zero",
     author: {
-      name: "ZCode",
-      email: "dev@zcode.z.ai",
+      name: "Pi Zero",
+      email: "dev@pizero.dev",
     },
   },
   // macOS 签名阶段会对 Electron Framework 下每个语言包逐个 codesign。
@@ -856,10 +859,9 @@ export default {
   // OAuth deep link 协议注册（macOS 打包后需要 Info.plist 中声明 CFBundleURLTypes）
   protocols: [
     {
-      // 协议处理器的展示名之前使用小写 scheme，打包产物里的协议描述无法体现产品名。
-      // 展示名跟随安装包身份；scheme 仍保持 zcode，因此两个应用中最后注册者会成为默认 handler。
+      // 协议处理器使用独立 scheme（pizero），与本机已安装的 ZCode（zcode://）彻底隔离。
       name: desktopProductIdentity.productName,
-      schemes: ["zcode"],
+      schemes: ["pizero"],
     },
   ],
   mac: {
@@ -931,7 +933,7 @@ export default {
     // 与 /usr/share/icons/hicolor/*/apps/zcode.png 保持一致。
     executableName: desktopProductIdentity.linuxExecutableName,
     category: "Development",
-    maintainer: "ZCode <dev@zcode.z.ai>",
+    maintainer: "Pi Zero <dev@pizero.dev>",
   },
   deb: {
     // 生产版与 Preview 必须是两个 dpkg package；只改可执行名仍会让安装器把另一版本当成升级替换。
@@ -986,24 +988,11 @@ export default {
     installerHeaderIcon: "build/icon_installer.ico",
   },
   detectUpdateChannel: false,
-  publish:
-    buildTimeConfig.updateProvider === "github"
-      ? {
-          // fork 走 GitHub Releases：app-update.yml 由 electron-builder 直接写入 owner/repo，
-          // electron-updater 用内置 GitHubProvider 读取 latest.yml，不再经过服务端 manifest。
-          provider: "github",
-          owner: buildTimeConfig.updateGithubOwner,
-          repo: buildTimeConfig.updateGithubRepo,
-          releaseType: "release",
-        }
-      : {
-          provider: "generic",
-          // 当前 OSS/CDN 对多 Range 请求返回 206，但 Content-Type 仍是 application/x-msdownload，
-          // electron-updater 会因缺少 multipart/byteranges 直接回退整包下载。关闭 multiple range 后仍走差分，
-          // 只是按单 Range 顺序拉取差异块，避免 Windows 用户更新时从约 15MB 退化成 300MB+ 全量包。
-          useMultipleRangeRequest: false,
-          // 新客户端运行时使用服务端 manifest provider；这里仅保留 electron-builder 必需的
-          // generic publish 占位，避免打包产物继续携带可配置的旧 stable feed。
-          url: "http://localhost:8081",
-        },
+  publish: {
+    // Pi Zero 独立发布至 GitHub Releases（fish9988/pi-zero），彻底移除上游 ZCode manifest/generic 更新源。
+    provider: "github",
+    owner: buildTimeConfig.updateGithubOwner || "fish9988",
+    repo: buildTimeConfig.updateGithubRepo || "pi-zero",
+    releaseType: "release",
+  },
 };

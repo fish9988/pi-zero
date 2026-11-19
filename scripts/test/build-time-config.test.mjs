@@ -15,13 +15,13 @@ async function writeDefaults(name, content) {
   return path;
 }
 
-/** 更新源默认值与「保持上游行为」的其余开关；避免每个用例重复整段字面量。 */
+/** Pi Zero 默认更新源指向 fish9988/pi-zero GitHub Releases，并关闭上游强制升级 gate。 */
 const DEFAULT_UPDATE_SOURCE = {
-  updateProvider: "manifest",
-  updateGithubOwner: "",
-  updateGithubRepo: "",
-  updateAllowUnsignedWindows: false,
-  updateForceGateEnabled: true,
+  updateProvider: "github",
+  updateGithubOwner: "fish9988",
+  updateGithubRepo: "pi-zero",
+  updateAllowUnsignedWindows: true,
+  updateForceGateEnabled: false,
 };
 
 test("没有私有默认配置也没有环境变量时三项能力都关闭", async () => {
@@ -89,9 +89,12 @@ test("github 更新源解析 owner/repo 并允许放宽签名与关闭强更 gat
   assert.equal(config.updateForceGateEnabled, false);
 });
 
-test("github 源必须提供合法 owner/repo", async () => {
+test("github 源显式提供非法或空 owner/repo 时报错", async () => {
   await assert.rejects(
-    resolveBuildTimeConfig({ ZCODE_UPDATE_PROVIDER: "github" }),
+    resolveBuildTimeConfig({
+      ZCODE_UPDATE_PROVIDER: "github",
+      ZCODE_UPDATE_GITHUB_REPO: "",
+    }),
     /ZCODE_UPDATE_GITHUB_REPO is required/,
   );
   await assert.rejects(
@@ -108,9 +111,11 @@ test("未知 provider 与非法强更取值不被静默接受", async () => {
     resolveBuildTimeConfig({ ZCODE_UPDATE_PROVIDER: "oss" }),
     /invalid ZCODE_UPDATE_PROVIDER/,
   );
-  // 只有显式 0/false/no 才关闭 gate，其它拼写保持开启，避免误配置后失去强更保护。
+  // Pi Zero 默认关闭远端强更 gate，只有显式 1/true/yes 才开启。
   const config = await resolveBuildTimeConfig({ ZCODE_UPDATE_FORCE_GATE: "off" });
-  assert.equal(config.updateForceGateEnabled, true);
+  assert.equal(config.updateForceGateEnabled, false);
+  const enabledConfig = await resolveBuildTimeConfig({ ZCODE_UPDATE_FORCE_GATE: "1" });
+  assert.equal(enabledConfig.updateForceGateEnabled, true);
 });
 
 test("define 以 JSON 字面量注入", () => {
@@ -125,11 +130,11 @@ test("define 以 JSON 字面量注入", () => {
       __ZCODE_ARMS_RUM_ENDPOINT__: '"https://rum.example.com/x"',
       __ZCODE_TELEMETRY_REPORT_ENDPOINT__: '""',
       __ZCODE_AUTO_UPDATE_ENABLED__: "true",
-      __ZCODE_UPDATE_PROVIDER__: '"manifest"',
-      __ZCODE_UPDATE_GITHUB_OWNER__: '""',
-      __ZCODE_UPDATE_GITHUB_REPO__: '""',
-      __ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS__: "false",
-      __ZCODE_UPDATE_FORCE_GATE_ENABLED__: "true",
+      __ZCODE_UPDATE_PROVIDER__: '"github"',
+      __ZCODE_UPDATE_GITHUB_OWNER__: '"fish9988"',
+      __ZCODE_UPDATE_GITHUB_REPO__: '"pi-zero"',
+      __ZCODE_UPDATE_ALLOW_UNSIGNED_WINDOWS__: "true",
+      __ZCODE_UPDATE_FORCE_GATE_ENABLED__: "false",
     },
   );
 });
