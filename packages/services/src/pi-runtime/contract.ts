@@ -1,7 +1,8 @@
 /**
- * pi-runtime 公开契约：发现结果、RPC 客户端接口、握手探针与进程托管类型。
- * 跨模块调用方只允许从本契约或 index.ts 导入。
+ * pi-runtime 公开契约：发现结果、RPC 客户端接口、握手探针、V4 适配器选项与进程托管类型。
+ * 跨模块调用方只允许从本契约或 index.ts 导入；严禁反向导入 adapters/ 以避免环依赖。
  */
+import type { IZCodeAgentService, ZCodeAgentSessionTarget } from "#src/zcode-agent/zcodeAgent.js";
 import type {
   PiExtensionUiResponsePayload,
   PiModelInfo,
@@ -139,3 +140,43 @@ export interface IPiRpcClient {
   sendExtensionUiResponse(response: PiExtensionUiResponsePayload): void;
   closeAndWait(timeoutMs?: number): Promise<void>;
 }
+
+export type {
+  PiModelCatalogSnapshot,
+  PiThinkingCapability,
+  PiThinkingLevelMap,
+} from "#src/pi-runtime/domain/piModelCapability.js";
+
+export type {
+  BeginUserTurnInput,
+  ProjectionCommit,
+  RecordGuidedInputParams,
+} from "#src/pi-runtime/domain/piEventProjector.js";
+
+export interface PiModelCatalogOptions {
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly managedRuntimeDir?: string | undefined;
+  readonly defaultCwd?: string | undefined;
+  readonly ttlMs?: number | undefined;
+}
+
+export type PiPrepareSessionCreation = (
+  target: Omit<ZCodeAgentSessionTarget, "sessionId"> & {
+    sessionId?: string | undefined;
+    projectId: string | null;
+    creationCommand?: { clientId: string; commandId: string } | undefined;
+    additionalDirectories?: string[] | undefined;
+  },
+) => Promise<{ sessionId: string; additionalDirectories: string[] }>;
+
+export interface PiAgentServiceOptions {
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly managedRuntimeDir?: string | undefined;
+  readonly prepareSessionCreation?: PiPrepareSessionCreation | undefined;
+}
+
+export type PiAgentService = IZCodeAgentService & {
+  disposeAllAndWait(): Promise<void>;
+};

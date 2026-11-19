@@ -48,6 +48,9 @@ import { createGitCommandProvider } from "#src/git/providers/gitCommandProvider.
 import { HOST_WORKTREE_COMMAND } from "#src/zcode-agent/zcodeAgent.js";
 import { createTaskGroupService, ITaskGroupService, groupTaskKey } from "#src/task-groups/index.js";
 import {
+  PiModelCatalog,
+  createPiAgentService,
+  createPiAugmentedModelSelectionService,
   disposeAllPiProcesses,
   disposeAllPiProcessesAndWait,
 } from "#src/pi-runtime/index.js";
@@ -765,6 +768,7 @@ interface ManagedCuaHelperHostDispose {
 // 的 WeakMap 侧表登记，dispose 时统一终止（best-effort，不阻断其它资源回收）。
 const managedCuaHelperHosts = new WeakMap<ServiceCollection, ManagedCuaHelperHostDispose>();
 const providerRuntimes = new WeakMap<ServiceCollection, ProviderRuntime>();
+const piRuntimeDisposers = new WeakMap<ServiceCollection, () => void>();
 const providerProvisioningSources = new WeakMap<ServiceCollection, ProviderProvisioningSource>();
 const providerProvisioningTriggerDisposers = new WeakMap<
   ServiceCollection,
@@ -2454,7 +2458,31 @@ export function createLocalServices(options: {
   // primaryWindowCoordinator 创建并复用已有窗口，renderer 刷新复用原 Host。以后支持多个主窗口时，
   // 删除需要改由 main 跨 Host 协调（docs/git/worktree.md §8.3）。
   const worktreeRemovalGate = createWorktreeRemovalGate();
-  const zcodeAgentService = createZCodeAgentService({
+  // Route A 引擎切换点：默认走原生 Pi 适配器，仅在显式设置 ZCODE_AGENT_ENGINE=legacy 时回退旧引擎。
+  const useLegacyAgentEngine = process.env.ZCODE_AGENT_ENGINE?.trim().toLowerCase() === "legacy";
+  const piModelCatalog = useLegacyAgentEngine ? null : new PiModelCatalog();
+  const effectiveModelSelection = piModelCatalog
+    ? createPiAugmentedModelSelectionService(providerRuntime.modelSelection, piModelCatalog)
+    : providerRuntime.modelSelection;
+  const prepareSessionCreation = async (target: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+    sessionId?: string;
+    projectId: string | null;
+    creationCommand?: { clientId: string; commandId: string };
+    additionalDirectories?: string[];
+  }) => {
+    const prepared = (await taskIndexRepo.getProjectRepository()).reserveCreatedTask({
+      task: { ...target, taskId: target.sessionId },
+      projectId: target.projectId,
+      creationCommand: target.creationCommand,
+      additionalDirectories: target.additionalDirectories,
+    });
+    return { sessionId: prepared.taskId, additionalDirectories: prepared.additionalDirectories };
+  };
+  const zcodeAgentService: IZCodeAgentService =
+    useLegacyAgentEngine
+      ? createZCodeAgentService({
     credentialCipherProvider,
     runSessionOperation: (target, operation) =>
       worktreeRemovalGate.runSessionOperation(
@@ -2483,15 +2511,7 @@ export function createLocalServices(options: {
         parentTaskId: target.parentSessionId,
       });
     },
-    prepareSessionCreation: async (target) => {
-      const prepared = (await taskIndexRepo.getProjectRepository()).reserveCreatedTask({
-        task: { ...target, taskId: target.sessionId },
-        projectId: target.projectId,
-        creationCommand: target.creationCommand,
-        additionalDirectories: target.additionalDirectories,
-      });
-      return { sessionId: prepared.taskId, additionalDirectories: prepared.additionalDirectories };
-    },
+    prepareSessionCreation,
     resolveSessionDirectories: async (target) =>
       (await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId }))
         .additionalDirectories,
@@ -2715,7 +2735,11 @@ export function createLocalServices(options: {
             };
           },
         }),
-  });
+  })
+    : createPiAgentService({
+        catalog: piModelCatalog ?? undefined,
+        prepareSessionCreation,
+      });
   providerConnectivityAgentService = zcodeAgentService;
   // Helper health probe 短暂超时不应在 Computer Use turn 中途回收 Agent。resolver 会把 restart
   // 推迟到下一个 request/turn 边界；若 broker 确实已失效，当前 turn 会自然失败并由下一次请求恢复。
@@ -2777,7 +2801,7 @@ export function createLocalServices(options: {
       async readCurrentModel() {
         // Git sidecar 属于目标 Environment；初始模型直接读取同一 Host View，
         // 不再通过临时 Agent workspace state 反推模型与 reasoning。
-        return (await providerRuntime.modelSelection.getView()).preferredSelection ?? null;
+        return (await effectiveModelSelection.getView()).preferredSelection ?? null;
       },
     },
     textGenerator: {
@@ -2864,7 +2888,7 @@ export function createLocalServices(options: {
         : undefined,
     tasks: zcodeTaskService,
     agent: zcodeAgentService,
-    models: providerRuntime.modelSelection,
+    models: effectiveModelSelection,
     navigation: options?.appControlNavigation,
     prepareCreation: ({ projectId }) => projectService.prepareSession({ projectId }),
     findCreationReceipts: async (creationCommand) =>
@@ -3380,6 +3404,15 @@ export function createLocalServices(options: {
   if (pluginUserOptionsReader) pluginUserOptionsReaders.set(services, pluginUserOptionsReader);
 
   providerRuntimes.set(services, providerRuntime);
+  if (piModelCatalog) {
+    const augmentedSelection = effectiveModelSelection;
+    piRuntimeDisposers.set(services, () => {
+      if ("dispose" in augmentedSelection && typeof augmentedSelection.dispose === "function") {
+        augmentedSelection.dispose();
+      }
+      piModelCatalog.dispose();
+    });
+  }
   providerProvisioningSources.set(services, providerProvisioningSource);
   providerProvisioningTriggerDisposers.set(services, providerProvisioningDisposers);
   // desktop-attached-remote 的组织态在远端 Host 库里，由远端自己的扫描器归档；本机不扫。
@@ -3397,7 +3430,7 @@ export function createLocalServices(options: {
   }
   services
     .register(IProviderSettingsService, providerRuntime.providerSettings)
-    .register(IModelSelectionService, providerRuntime.modelSelection);
+    .register(IModelSelectionService, effectiveModelSelection);
   if (isDesktopAttachedRemote || options.providerProvisioningTargetEnabled === true) {
     services.register(
       IProviderProvisioningTargetService,
@@ -3538,6 +3571,9 @@ export function disposeServiceResources(services: ServiceCollection): void {
       service.disposeAll();
     }
   }
+  // 先置 piModelCatalog / augmentedSelection 为 disposed，再统一清理所有 Pi 子进程，避免探针竞态复活。
+  piRuntimeDisposers.get(services)?.();
+  piRuntimeDisposers.delete(services);
   disposeAllPiProcesses();
 
   // 同步 best-effort：终止托管的 Computer Use Helper（不 await，避免阻断同步 dispose 路径）。
@@ -3565,6 +3601,8 @@ export async function disposeServiceResourcesAndWait(services: ServiceCollection
   // 旧的同步 dispose 会在 host 退出时丢掉强杀 timer，导致 zcode-cli/app-server 变成孤儿进程。
   // CLI 的 EOF 宽限不能被云内容或终端清理消耗；先关闭 Agent admission 并完成进程回收。
   const agentService = services.getOptional(IZCodeAgentService);
+  piRuntimeDisposers.get(services)?.();
+  piRuntimeDisposers.delete(services);
   if (agentService) {
     if (hasDisposeAllAndWait(agentService)) {
       await agentService.disposeAllAndWait();

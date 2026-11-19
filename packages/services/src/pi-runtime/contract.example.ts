@@ -1,9 +1,9 @@
 /**
- * pi-runtime 标准调用示例：演示隔离目录握手探测与桌面退出时统一清理所有 Pi 子进程。
+ * pi-runtime 标准调用示例：演示隔离目录握手探测、Route A V4 适配器创建与退出零孤儿清理。
  */
 import {
-  PiRpcClient,
-  discoverPi,
+  PiModelCatalog,
+  createPiAgentService,
   disposeAllPiProcessesAndWait,
   probePiRpcHandshake,
 } from "#src/pi-runtime/index.js";
@@ -20,19 +20,14 @@ export async function examplePiRuntimeUsage(
     throw new Error(`Pi handshake failed at ${probe.stage}: ${probe.message}`);
   }
 
-  const launch = await discoverPi();
-  if (!launch) return;
-
-  const client = await PiRpcClient.spawn({
-    launch,
-    cwd: workspaceDir,
-    noSession: true,
-    env: { ...process.env, PI_CODING_AGENT_DIR: isolatedAgentDir },
-  });
+  const env = { ...process.env, PI_CODING_AGENT_DIR: isolatedAgentDir };
+  const catalog = new PiModelCatalog({ env, defaultCwd: workspaceDir });
+  const agentService = createPiAgentService({ catalog, env });
   try {
-    await client.getState();
+    await agentService.initialize({ workspacePath: workspaceDir });
   } finally {
-    await client.closeAndWait();
+    await agentService.disposeAllAndWait();
+    catalog.dispose();
     await disposeAllPiProcessesAndWait();
   }
 }

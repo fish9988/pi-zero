@@ -2,8 +2,11 @@
  * pi-runtime 公开入口：跨平台 `pi` 发现、严格 LF JSONL RPC 客户端、握手探针与进程表清理。
  */
 export type {
+  BeginUserTurnInput,
   IPiRpcClient,
   PiAgentMessage,
+  PiAgentService,
+  PiAgentServiceOptions,
   PiAssistantMessage,
   PiAssistantMessageEvent,
   PiAssistantStopReason,
@@ -24,7 +27,10 @@ export type {
   PiHandshakeProbeResult,
   PiImageContent,
   PiLaunch,
+  PiModelCatalogOptions,
+  PiModelCatalogSnapshot,
   PiModelInfo,
+  PiPrepareSessionCreation,
   PiProcessContainment,
   PiPromptDisposition,
   PiQueueDisposition,
@@ -42,8 +48,10 @@ export type {
   PiStateData,
   PiSystemMessage,
   PiTextContent,
+  PiThinkingCapability,
   PiThinkingContent,
   PiThinkingLevel,
+  PiThinkingLevelMap,
   PiToolCallContent,
   PiToolResultMessage,
   PiTreeNode,
@@ -51,9 +59,23 @@ export type {
   PiUsageCost,
   PiUserMessage,
   PiVersionProbeResult,
+  ProjectionCommit,
+  RecordGuidedInputParams,
 } from "#src/pi-runtime/contract.js";
 
 export { isPiRecord } from "#src/pi-runtime/domain/piRpcTypes.js";
+
+export {
+  PI_THINKING_LEVEL_ORDER,
+  buildWorkspaceConfigStateFromPiModels,
+  clampPiThinkingLevel,
+  getSupportedThinkingLevels,
+  mergePiModelsIntoSelectionView,
+  piModelsToModelSelectionProviders,
+  pickDefaultThinkingLevel,
+} from "#src/pi-runtime/domain/piModelCapability.js";
+
+export { PiEventProjector } from "#src/pi-runtime/domain/piEventProjector.js";
 
 export {
   discoverPi,
@@ -74,3 +96,10 @@ export {
 } from "#src/pi-runtime/adapters/piProcessRegistry.js";
 
 export { probePiRpcHandshake } from "#src/pi-runtime/adapters/piHandshakeProbe.js";
+
+export {
+  PiModelCatalog,
+  createPiAugmentedModelSelectionService,
+} from "#src/pi-runtime/adapters/piModelCatalog.js";
+
+export { createPiAgentService } from "#src/pi-runtime/adapters/piAgentService.js";
