@@ -19,14 +19,17 @@ import {
   type CommandAck,
   type CommandEnvelope,
   type CommandPayloadMap,
+  type ConversationSnapshot,
   type ConversationTopicWireCandidate,
   type SessionSummary,
   type SubscribeAck,
   type V4ConversationFileChangesResult,
   type V4ConversationRowsRangeResult,
+  type WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import type { PiModelInfo, PiRpcEvent, PiRpcExitInfo } from "#src/pi-runtime/contract.js";
+import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import {
   PiEventProjector,
   type ProjectionCommit,
@@ -35,7 +38,6 @@ import {
   buildLegacySessionStateSnapshot,
   buildSessionSummary,
   createCommandAck,
-  createInitialSessionConfig,
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
@@ -47,6 +49,7 @@ import {
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import {
   hydratePiClientInitialState,
+  resolveInitialControllerConfig,
   resolveRequestedSelectionSwitch,
   spawnConfiguredPiClient,
   syncPiModelAndThoughtToClient,
@@ -81,6 +84,12 @@ export interface PiSessionControllerOptions {
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly platform?: NodeJS.Platform | undefined;
   readonly managedRuntimeDir?: string | undefined;
+  readonly hydratedFromDisk?:
+    | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
+    | undefined;
+  readonly readOnlyArchive?:
+    | { readonly snapshot: ConversationSnapshot; readonly rows: readonly WireConversationRow[] }
+    | undefined;
   readonly callbacks: PiSessionControllerCallbacks;
 }
 
@@ -92,6 +101,7 @@ export class PiSessionController {
   readonly cwd: string;
   readonly parentSessionId: string | undefined;
   readonly createdAt: number;
+  readonly readOnly: boolean;
 
   private lastActivityAt: number;
   private publishedToIndex = false;
@@ -119,37 +129,32 @@ export class PiSessionController {
     this.workspaceIdentity = options.workspaceIdentity;
     this.cwd = options.cwd;
     this.parentSessionId = options.parentSessionId;
-    this.createdAt = Date.now();
-    this.lastActivityAt = this.createdAt;
+    this.readOnly = Boolean(options.readOnlyArchive);
+    const now = Date.now();
+    this.createdAt = options.hydratedFromDisk?.hydrated.createdAt ?? now;
+    this.lastActivityAt = options.hydratedFromDisk?.hydrated.lastActivityAt ?? this.createdAt;
+    this.publishedToIndex = Boolean(options.hydratedFromDisk);
+    this.piSessionFile = options.hydratedFromDisk?.filePath;
     this.catalog = options.catalog;
     this.env = options.env;
     this.platform = options.platform;
     this.managedRuntimeDir = options.managedRuntimeDir;
     this.callbacks = options.callbacks;
 
-    const catalogSnapshot = this.catalog.getSnapshot();
-    const effectiveModelSelection: ModelSelection | undefined = options.modelSelection
-      ? {
-          ...options.modelSelection,
-          ...(options.thoughtLevel ? { options: { reasoningLevel: options.thoughtLevel } } : {}),
-        }
-      : undefined;
-    const config = createInitialSessionConfig({
-      modelSelection: effectiveModelSelection,
-      catalogModels: catalogSnapshot.models,
-      defaultModel: catalogSnapshot.defaultModel,
-      defaultThinkingLevel: options.thoughtLevel ?? catalogSnapshot.defaultThinkingLevel,
+    const { config, contextWindowMax } = resolveInitialControllerConfig({
+      catalog: this.catalog,
+      modelSelection: options.modelSelection,
+      thoughtLevel: options.thoughtLevel,
     });
-    const matched = catalogSnapshot.models.find(
-      (model) => model.provider === config.provider && model.id === config.model,
-    );
     this.projector = new PiEventProjector({
       sessionId: this.sessionId,
       workspacePath: this.workspacePath,
       logEpoch: `pi-${randomUUID()}`,
       attemptId: `init-${randomUUID()}`,
       config,
-      contextWindowMax: matched?.contextWindow,
+      contextWindowMax,
+      hydrated: options.hydratedFromDisk?.hydrated,
+      readOnlyArchive: options.readOnlyArchive,
     });
   }
 
@@ -237,7 +242,7 @@ export class PiSessionController {
   }
 
   async ensureReady(): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.readOnly) return;
     await this.ensureClient();
   }
 
@@ -268,6 +273,15 @@ export class PiSessionController {
         reasonCode: "fault.session.disposed",
       });
     }
+    if (this.readOnly && envelope.type !== "deleteSession") {
+      return createCommandAck({
+        commandId: envelope.commandId,
+        status: "rejected",
+        revisionAtDecision: this.projector.getRevision(),
+        reasonCode: "guard.legacySessionReadOnly",
+        message: "Legacy ZCode session is read-only archive",
+      });
+    }
 
     if (
       COMMANDS_REQUIRING_BASE_REVISION.has(envelope.type) &&
@@ -281,8 +295,6 @@ export class PiSessionController {
         reasonCode: "proto.staleRevision",
       });
     }
-
-    if (envelope.type === "stop") return this.handleStop(envelope.commandId);
 
     const host = this.createCommandHost();
     if (envelope.type === "sendText") {
@@ -368,21 +380,6 @@ export class PiSessionController {
     }
   }
 
-  private async handleStop(commandId: string): Promise<CommandAck> {
-    this.broadcastCommit(this.projector.markStopping());
-    if (this.client?.alive) {
-      await this.client.clearQueue().catch(() => {});
-      await this.client.abort().catch(() => {});
-    } else {
-      this.broadcastCommit(this.projector.settleAfterStopWithoutProcess(Date.now()));
-    }
-    return createCommandAck({
-      commandId,
-      status: "accepted",
-      revisionAtDecision: this.projector.getRevision(),
-    });
-  }
-
   private async handleDeleteSession(commandId: string): Promise<CommandAck> {
     const rev = this.projector.getRevision();
     await this.disposeAndWait();
@@ -398,11 +395,13 @@ export class PiSessionController {
     if (this.client?.alive) return this.client;
     if (this.spawnPromise) return this.spawnPromise;
     if (this.disposed) throw new Error("Session disposed before starting Pi");
+    if (this.readOnly) throw new Error("Legacy ZCode archive session is read-only");
 
     // 先同步占位 spawnPromise 再 await discoverPi，防止并发调用或关闭期间 discoverPi 竞态泄漏双进程。
     const promise = (async () => {
       const config = this.projector.getSnapshot().config;
-      const client = await spawnConfiguredPiClient({
+      const spawned = await spawnConfiguredPiClient({
+        sessionId: this.sessionId,
         cwd: this.cwd,
         env: this.env,
         platform: this.platform,
@@ -413,9 +412,10 @@ export class PiSessionController {
         thought: override?.thought ?? config.thought,
         isDisposed: () => this.disposed,
       });
-      this.attachClient(client);
-      await this.hydrateFromClientState(client);
-      return client;
+      if (spawned.sessionFile) this.piSessionFile = spawned.sessionFile;
+      this.attachClient(spawned.client);
+      await this.hydrateFromClientState(spawned.client);
+      return spawned.client;
     })().finally(() => {
       if (this.spawnPromise === promise) this.spawnPromise = null;
     });

@@ -10,9 +10,11 @@ import {
   getSupportedThinkingLevels,
   pickDefaultThinkingLevel,
 } from "#src/pi-runtime/domain/piModelCapability.js";
+import { createInitialSessionConfig } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { discoverPi } from "#src/pi-runtime/adapters/piDiscover.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
+import { preparePiSessionFileForSpawn } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
 
 const MODEL_NOT_FOUND_RE = /model not found/i;
 
@@ -236,6 +238,7 @@ export function resolveRequestedSelectionSwitch(
 
 /** 发现本机/测试 Pi 并以会话当前模型、思考档位与 sessionFile 选项拉起 RPC 子进程。 */
 export async function spawnConfiguredPiClient(input: {
+  sessionId: string;
   cwd: string;
   env?: NodeJS.ProcessEnv | undefined;
   platform?: NodeJS.Platform | undefined;
@@ -245,7 +248,7 @@ export async function spawnConfiguredPiClient(input: {
   model?: string | undefined;
   thought?: string | undefined;
   isDisposed: () => boolean;
-}): Promise<PiRpcClient> {
+}): Promise<{ readonly client: PiRpcClient; readonly sessionFile: string | undefined }> {
   const launch = await discoverPi({
     env: input.env,
     platform: input.platform,
@@ -255,11 +258,26 @@ export async function spawnConfiguredPiClient(input: {
   if (!launch) throw new Error("Pi CLI (pi) not found on PATH");
 
   const effectiveCwd = input.cwd && existsSync(input.cwd) ? input.cwd : tmpdir();
+  let sessionFile = input.sessionFile;
+  if (!sessionFile) {
+    try {
+      sessionFile = await preparePiSessionFileForSpawn({
+        cwd: effectiveCwd,
+        sessionId: input.sessionId,
+        env: input.env,
+      });
+    } catch {
+      // 磁盘不可写时退回 Pi 默认会话路径，不阻断对话启动。
+      sessionFile = undefined;
+    }
+  }
+  if (input.isDisposed()) throw new Error("Session disposed while preparing Pi session file");
+
   const client = await PiRpcClient.spawn({
     launch,
     cwd: effectiveCwd,
     env: input.env,
-    ...(input.sessionFile ? { sessionFile: input.sessionFile } : {}),
+    ...(sessionFile ? { sessionFile } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.thought ? { thinkingLevel: input.thought } : {}),
@@ -268,5 +286,30 @@ export async function spawnConfiguredPiClient(input: {
     await client.closeAndWait(2_000).catch(() => {});
     throw new Error("Session disposed while starting Pi");
   }
-  return client;
+  return { client, sessionFile };
+}
+
+/** 构造新建会话控制器的初始模型配置与上下文上限（从目录快照与可选请求选择合成）。 */
+export function resolveInitialControllerConfig(input: {
+  catalog: PiModelCatalog;
+  modelSelection?: ModelSelection | undefined;
+  thoughtLevel?: string | undefined;
+}): { readonly config: SessionConfigState; readonly contextWindowMax: number | undefined } {
+  const snap = input.catalog.getSnapshot();
+  const effectiveSelection: ModelSelection | undefined = input.modelSelection
+    ? {
+        ...input.modelSelection,
+        ...(input.thoughtLevel ? { options: { reasoningLevel: input.thoughtLevel } } : {}),
+      }
+    : undefined;
+  const config = createInitialSessionConfig({
+    modelSelection: effectiveSelection,
+    catalogModels: snap.models,
+    defaultModel: snap.defaultModel,
+    defaultThinkingLevel: input.thoughtLevel ?? snap.defaultThinkingLevel,
+  });
+  const matched = snap.models.find(
+    (model) => model.provider === config.provider && model.id === config.model,
+  );
+  return { config, contextWindowMax: matched?.contextWindow };
 }

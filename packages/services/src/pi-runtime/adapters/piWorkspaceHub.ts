@@ -1,5 +1,5 @@
 /**
- * Pi 工作区级 V4 Topic 注册表与帧下发枢纽（sessions-index / workspace-config / commandAckCache）。
+ * Pi 工作区级 V4 Topic 注册表、磁盘 `.jsonl` 索引热同步与帧下发枢纽。
  */
 import { randomUUID } from "node:crypto";
 import { Emitter } from "@zcode/rpc";
@@ -13,29 +13,47 @@ import {
   sessionsIndexTopic,
   workspaceConfigTopic,
   type CommandAck,
+  type ConversationSnapshot,
   type ConversationTopicWireCandidate,
   type SessionSummary,
-  type SessionsIndexTopicFrame,
   type SessionsIndexTopicWireCandidate,
   type SubscribeAck,
-  type WorkspaceConfigTopicFrame,
+  type WireConversationRow,
   type WorkspaceConfigTopicWireCandidate,
 } from "@zcode/shared/zcode-protocol-v4";
 import type {
   ZCodeAgentRuntimeLifecycleEvent,
   ZCodeAgentWorkspaceTarget,
 } from "#src/zcode-agent/zcodeAgent.js";
+import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import { buildWorkspaceConfigStateFromPiModels } from "#src/pi-runtime/domain/piModelCapability.js";
 import {
   createSessionsIndexSnapshot,
   createWorkspaceConfigSnapshot,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import {
-  encodeV4TopicFrames,
+  emitSessionsIndexDeltaFrames,
+  emitSessionsIndexSnapshotFrames,
+  emitWorkspaceConfigDeltaFrames,
+  emitWorkspaceConfigSnapshotFrames,
+  type PiSessionsIndexDeltaItem,
   type TopicSubscriptionState,
 } from "#src/pi-runtime/adapters/piFrameEncoder.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import { PiSessionController } from "#src/pi-runtime/adapters/piSessionController.js";
+import {
+  buildLegacyReadOnlyArchivePayload,
+  buildReconciledSessionsResult,
+  diffDiskSessionSummaries,
+  loadHydratedPiSessionFromDisk,
+  mergePublishedSessionSummaries,
+} from "#src/pi-runtime/adapters/piSessionHydration.js";
+import {
+  PiSessionIndexScanner,
+  type PiDiskSessionRecord,
+} from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
+
+const TASK_INDEX_SUBSCRIBER_SCOPE = "task-index";
 
 export interface PiWorkspaceBucket {
   readonly workspaceKey: string;
@@ -44,6 +62,17 @@ export interface PiWorkspaceBucket {
   readonly generation: number;
   readonly identity: string;
   readonly sessions: Map<string, PiSessionController>;
+  diskSessions: Map<string, PiDiskSessionRecord>;
+  readonly deletedSessionIds: Set<string>;
+  readonly hydratingDiskSessions: Map<string, Promise<PiSessionController | null>>;
+  readonly hydratingOpenSessions: Map<string, Promise<PiSessionController>>;
+  initialScanDone: boolean;
+  initialScanPromise: Promise<void> | null;
+  refreshPromise: Promise<void> | null;
+  refreshPending: boolean;
+  watcherDispose: (() => void) | null;
+  readonly deferredTimers: Set<ReturnType<typeof setTimeout>>;
+  disposed: boolean;
   readonly conversationFrameEmitter: Emitter<ConversationTopicWireCandidate>;
   readonly sessionsIndexFrameEmitter: Emitter<SessionsIndexTopicWireCandidate>;
   readonly workspaceConfigFrameEmitter: Emitter<WorkspaceConfigTopicWireCandidate>;
@@ -65,6 +94,7 @@ export class PiWorkspaceHub {
   private readonly workspaces = new Map<string, PiWorkspaceBucket>();
   private readonly generationByWorkspaceKey = new Map<string, number>();
   private readonly catalog: PiModelCatalog;
+  private readonly scanner: PiSessionIndexScanner;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly platform: NodeJS.Platform | undefined;
   private readonly managedRuntimeDir: string | undefined;
@@ -85,6 +115,10 @@ export class PiWorkspaceHub {
     this.platform = options.platform;
     this.managedRuntimeDir = options.managedRuntimeDir;
     this.onRuntimeLifecycle = options.onRuntimeLifecycle;
+    this.scanner = new PiSessionIndexScanner({
+      env: options.env,
+      platform: options.platform,
+    });
   }
 
   nextSubscriptionId(prefix: string): string {
@@ -109,6 +143,17 @@ export class PiWorkspaceHub {
       generation,
       identity: `pi-ws-${randomUUID()}`,
       sessions: new Map(),
+      diskSessions: new Map(),
+      deletedSessionIds: new Set(),
+      hydratingDiskSessions: new Map(),
+      hydratingOpenSessions: new Map(),
+      initialScanDone: false,
+      initialScanPromise: null,
+      refreshPromise: null,
+      refreshPending: false,
+      watcherDispose: null,
+      deferredTimers: new Set(),
+      disposed: false,
       conversationFrameEmitter: new Emitter(),
       sessionsIndexFrameEmitter: new Emitter(),
       workspaceConfigFrameEmitter: new Emitter(),
@@ -135,6 +180,12 @@ export class PiWorkspaceHub {
       parentSessionId?: string | undefined;
       modelSelection?: ModelSelection | undefined;
       thoughtLevel?: string | undefined;
+      hydratedFromDisk?:
+        | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
+        | undefined;
+      readOnlyArchive?:
+        | { readonly snapshot: ConversationSnapshot; readonly rows: readonly WireConversationRow[] }
+        | undefined;
     },
   ): PiSessionController {
     const controller = new PiSessionController({
@@ -150,23 +201,178 @@ export class PiWorkspaceHub {
       env: this.env,
       platform: this.platform,
       managedRuntimeDir: this.managedRuntimeDir,
+      hydratedFromDisk: input.hydratedFromDisk,
+      readOnlyArchive: input.readOnlyArchive,
       callbacks: {
         emitConversationFrame: (frame) => bucket.conversationFrameEmitter.fire(frame),
         onSessionPublishedOrUpdated: (summary) => {
-          this.emitSessionsIndexDelta(bucket, { op: "session.upserted", session: summary });
+          bucket.deletedSessionIds.delete(summary.sessionId);
+          this.emitSessionsIndexDeltas(bucket, [{ op: "session.upserted", session: summary }]);
         },
         onSessionLifecycleChanged: (snapshot) => bucket.sessionLifecycleEmitter.fire(snapshot),
         onSessionDeleted: (deletedSessionId) => {
           bucket.sessions.delete(deletedSessionId);
-          this.emitSessionsIndexDelta(bucket, {
-            op: "session.removed",
-            sessionId: deletedSessionId,
-          });
+          bucket.diskSessions.delete(deletedSessionId);
+          bucket.deletedSessionIds.add(deletedSessionId);
+          this.emitSessionsIndexDeltas(bucket, [
+            { op: "session.removed", sessionId: deletedSessionId },
+          ]);
         },
       },
     });
-    bucket.sessions.set(input.sessionId, controller);
+    if (!bucket.disposed) {
+      bucket.sessions.set(input.sessionId, controller);
+    }
     return controller;
+  }
+
+  async ensureInitialDiskScan(bucket: PiWorkspaceBucket): Promise<void> {
+    if (bucket.initialScanDone || bucket.disposed) return;
+    if (bucket.initialScanPromise) return bucket.initialScanPromise;
+    const promise = (async () => {
+      try {
+        await this.refreshDiskSessions(bucket);
+      } catch {
+        // 磁盘扫描异常不阻断实时对话；留空集合并继续尝试挂载目录监听。
+      }
+      if (bucket.disposed) return;
+      bucket.initialScanDone = true;
+      if (!bucket.watcherDispose) {
+        bucket.watcherDispose = this.scanner.watchSessions(() => {
+          if (!bucket.disposed) void this.refreshDiskSessions(bucket);
+        });
+      }
+    })().finally(() => {
+      if (bucket.initialScanPromise === promise) bucket.initialScanPromise = null;
+    });
+    bucket.initialScanPromise = promise;
+    return promise;
+  }
+
+  async refreshDiskSessions(bucket: PiWorkspaceBucket): Promise<void> {
+    if (bucket.disposed) return;
+    if (bucket.refreshPromise) {
+      bucket.refreshPending = true;
+      return bucket.refreshPromise;
+    }
+    const run = (async () => {
+      do {
+        bucket.refreshPending = false;
+        const records = await this.scanner.scanWorkspace(bucket.workspacePath, bucket.workspaceKey);
+        if (bucket.disposed) return;
+        const diff = diffDiskSessionSummaries({
+          prev: bucket.diskSessions,
+          next: records,
+          ownedSessionIds: new Set(bucket.sessions.keys()),
+          deletedSessionIds: bucket.deletedSessionIds,
+        });
+        bucket.diskSessions = diff.nextMap;
+        const deltas: PiSessionsIndexDeltaItem[] = [
+          ...diff.upserted.map((session) => ({ op: "session.upserted" as const, session })),
+          ...diff.removed.map((sessionId) => ({ op: "session.removed" as const, sessionId })),
+        ];
+        if (deltas.length > 0 && bucket.sessionsIndexSubs.size > 0) {
+          this.emitSessionsIndexDeltas(bucket, deltas);
+        }
+      } while (bucket.refreshPending && !bucket.disposed);
+    })().finally(() => {
+      if (bucket.refreshPromise === run) bucket.refreshPromise = null;
+    });
+    bucket.refreshPromise = run;
+    return run;
+  }
+
+  getMergedPublishedSummaries(bucket: PiWorkspaceBucket): SessionSummary[] {
+    return mergePublishedSessionSummaries(
+      bucket.sessions,
+      bucket.diskSessions,
+      bucket.deletedSessionIds,
+    );
+  }
+
+  /** 尝试按 `sessionId` 从 Pi 磁盘 `.jsonl` 离线水合会话（不存在返回 null，零子进程）。 */
+  async tryHydrateDiskSession(
+    bucket: PiWorkspaceBucket,
+    sessionId: string,
+  ): Promise<PiSessionController | null> {
+    const existing = bucket.sessions.get(sessionId);
+    if (existing) return existing;
+    if (bucket.disposed || bucket.deletedSessionIds.has(sessionId)) return null;
+    const inflight = bucket.hydratingDiskSessions.get(sessionId);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      const record =
+        bucket.diskSessions.get(sessionId) ??
+        (await this.scanner.findBySessionId(sessionId, bucket.workspaceKey));
+      if (!record || bucket.disposed) return null;
+      const loaded = await loadHydratedPiSessionFromDisk({
+        scanner: this.scanner,
+        record,
+        workspacePath: bucket.workspacePath,
+        catalog: this.catalog,
+      });
+      if (!loaded || bucket.disposed) return null;
+      return (
+        bucket.sessions.get(sessionId) ??
+        this.createSessionController(bucket, {
+          sessionId,
+          cwd: loaded.hydrated.cwd || bucket.workspacePath,
+          hydratedFromDisk: loaded,
+        })
+      );
+    })().finally(() => {
+      bucket.hydratingDiskSessions.delete(sessionId);
+    });
+    bucket.hydratingDiskSessions.set(sessionId, promise);
+    return promise;
+  }
+
+  /**
+   * 打开历史会话（零子进程）：
+   * 1. 优先命中内存控制器；
+   * 2. 否则尝试离线水合磁盘 Pi `.jsonl`；
+   * 3. 仍未找到则回落旧版 ZCode 只读历史存档快照。
+   */
+  async hydrateOrOpenSession(
+    bucket: PiWorkspaceBucket,
+    sessionId: string,
+  ): Promise<PiSessionController> {
+    const existing = bucket.sessions.get(sessionId);
+    if (existing) return existing;
+    const inflight = bucket.hydratingOpenSessions.get(sessionId);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      const fromDisk = await this.tryHydrateDiskSession(bucket, sessionId);
+      if (fromDisk) return fromDisk;
+      const readOnlyArchive = await buildLegacyReadOnlyArchivePayload({
+        sessionId,
+        env: this.env,
+      });
+      return (
+        bucket.sessions.get(sessionId) ??
+        this.createSessionController(bucket, {
+          sessionId,
+          readOnlyArchive,
+        })
+      );
+    })().finally(() => {
+      bucket.hydratingOpenSessions.delete(sessionId);
+    });
+    bucket.hydratingOpenSessions.set(sessionId, promise);
+    return promise;
+  }
+
+  async reconcileSessionsIndex(target: ZCodeAgentWorkspaceTarget, sessionIds: readonly string[]) {
+    const bucket = this.getOrCreateWorkspace(target);
+    await this.ensureInitialDiskScan(bucket);
+    return buildReconciledSessionsResult({
+      sessionIds,
+      sessions: bucket.sessions,
+      diskSessions: bucket.diskSessions,
+      deletedSessionIds: bucket.deletedSessionIds,
+    });
   }
 
   rememberCommandAck(
@@ -183,7 +389,10 @@ export class PiWorkspaceHub {
     }
   }
 
-  subscribeSessionsIndex(target: ZCodeAgentWorkspaceTarget): SubscribeAck {
+  async subscribeSessionsIndex(
+    target: ZCodeAgentWorkspaceTarget,
+    options?: { readonly subscriberScope?: string | undefined },
+  ): Promise<SubscribeAck> {
     const bucket = this.getOrCreateWorkspace(target);
     const subscriptionId = this.nextSubscriptionId("pi_idx");
     const sub: TopicSubscriptionState = {
@@ -191,8 +400,40 @@ export class PiWorkspaceHub {
       topic: sessionsIndexTopic(bucket.workspaceKey),
       logicalFrameOrdinal: 0,
     };
-    bucket.sessionsIndexSubs.set(subscriptionId, sub);
-    this.emitSessionsIndexSnapshot(bucket, sub, "initial");
+
+    if (options?.subscriberScope === TASK_INDEX_SUBSCRIBER_SCOPE) {
+      // task-index syncer 的首帧快照静默写库不发侧栏刷新广播；
+      // 先下发空基线快照，再通过 session.upserted delta 触发 workspace_task_list_changed 立即点亮侧栏。
+      bucket.sessionsIndexSubs.set(subscriptionId, sub);
+      this.emitSessionsIndexSnapshot(bucket, sub, "initial", []);
+      if (!bucket.initialScanDone) {
+        void this.ensureInitialDiskScan(bucket);
+      } else {
+        const summaries = this.getMergedPublishedSummaries(bucket);
+        if (summaries.length > 0) {
+          const timer = setTimeout(() => {
+            bucket.deferredTimers.delete(timer);
+            if (bucket.disposed || !bucket.sessionsIndexSubs.has(subscriptionId)) return;
+            const latest = this.getMergedPublishedSummaries(bucket);
+            if (latest.length > 0) {
+              this.emitSessionsIndexDeltas(
+                bucket,
+                latest.map((session) => ({ op: "session.upserted" as const, session })),
+              );
+            }
+          }, 0);
+          timer.unref?.();
+          bucket.deferredTimers.add(timer);
+        }
+      }
+      return { subscriptionId, mode: "snapshot", logEpoch: bucket.sessionsIndexLogEpoch };
+    }
+
+    await this.ensureInitialDiskScan(bucket);
+    if (!bucket.disposed) {
+      bucket.sessionsIndexSubs.set(subscriptionId, sub);
+      this.emitSessionsIndexSnapshot(bucket, sub, "initial");
+    }
     return { subscriptionId, mode: "snapshot", logEpoch: bucket.sessionsIndexLogEpoch };
   }
 
@@ -240,20 +481,12 @@ export class PiWorkspaceHub {
       if (bucket.workspaceConfigSubs.size === 0) continue;
       const fromSeq = bucket.workspaceConfigSeq;
       bucket.workspaceConfigSeq += 1;
-      const toSeq = bucket.workspaceConfigSeq;
-      for (const sub of bucket.workspaceConfigSubs.values()) {
-        const logicalFrame: WorkspaceConfigTopicFrame = {
-          topic: sub.topic,
-          subscriptionId: sub.subscriptionId,
-          fromSeq,
-          toSeq,
-          sentAt,
-          payload: { kind: "deltas", deltas: [{ op: "config.updated", config }] },
-        };
-        for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
-          bucket.workspaceConfigFrameEmitter.fire(wire);
-        }
-      }
+      emitWorkspaceConfigDeltaFrames(
+        bucket.workspaceConfigSubs.values(),
+        { fromSeq, toSeq: bucket.workspaceConfigSeq, config },
+        sentAt,
+        (wire) => bucket.workspaceConfigFrameEmitter.fire(wire),
+      );
     }
   }
 
@@ -269,60 +502,38 @@ export class PiWorkspaceHub {
     const allBuckets = [...this.workspaces.values()];
     this.workspaces.clear();
     await Promise.all(allBuckets.map((bucket) => this.disposeBucket(bucket)));
+    this.scanner.dispose();
   }
 
-  private emitSessionsIndexDelta(
+  private emitSessionsIndexDeltas(
     bucket: PiWorkspaceBucket,
-    delta:
-      | { op: "session.upserted"; session: SessionSummary }
-      | { op: "session.removed"; sessionId: string },
+    deltas: readonly PiSessionsIndexDeltaItem[],
   ): void {
+    if (deltas.length === 0 || bucket.disposed) return;
     const fromSeq = bucket.sessionsIndexSeq;
     bucket.sessionsIndexSeq += 1;
-    const toSeq = bucket.sessionsIndexSeq;
-    const sentAt = Date.now();
-    for (const sub of bucket.sessionsIndexSubs.values()) {
-      const logicalFrame: SessionsIndexTopicFrame = {
-        topic: sub.topic,
-        subscriptionId: sub.subscriptionId,
-        fromSeq,
-        toSeq,
-        sentAt,
-        payload: { kind: "deltas", deltas: [delta] },
-      };
-      for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
-        bucket.sessionsIndexFrameEmitter.fire(wire);
-      }
-    }
+    emitSessionsIndexDeltaFrames(
+      bucket.sessionsIndexSubs.values(),
+      { fromSeq, toSeq: bucket.sessionsIndexSeq, deltas },
+      Date.now(),
+      (wire) => bucket.sessionsIndexFrameEmitter.fire(wire),
+    );
   }
 
   private emitSessionsIndexSnapshot(
     bucket: PiWorkspaceBucket,
     sub: TopicSubscriptionState,
     deliveryKind: "initial" | "recovery",
+    sessionsOverride?: readonly SessionSummary[],
   ): void {
-    const published: SessionSummary[] = [];
-    for (const controller of bucket.sessions.values()) {
-      if (controller.isPublishedToIndex()) published.push(controller.getSummary());
-    }
-    const logicalFrame: SessionsIndexTopicFrame = {
-      topic: sub.topic,
-      subscriptionId: sub.subscriptionId,
-      fromSeq: 0,
-      toSeq: bucket.sessionsIndexSeq,
-      sentAt: Date.now(),
-      payload: {
-        kind: "snapshot",
-        snapshot: createSessionsIndexSnapshot({
-          workspaceId: bucket.workspaceKey,
-          logEpoch: bucket.sessionsIndexLogEpoch,
-          sessions: published,
-        }),
-      },
-    };
-    for (const wire of encodeV4TopicFrames(logicalFrame, sub, deliveryKind)) {
-      bucket.sessionsIndexFrameEmitter.fire(wire);
-    }
+    const snapshot = createSessionsIndexSnapshot({
+      workspaceId: bucket.workspaceKey,
+      logEpoch: bucket.sessionsIndexLogEpoch,
+      sessions: sessionsOverride ?? this.getMergedPublishedSummaries(bucket),
+    });
+    emitSessionsIndexSnapshotFrames(sub, snapshot, bucket.sessionsIndexSeq, deliveryKind, (wire) =>
+      bucket.sessionsIndexFrameEmitter.fire(wire),
+    );
   }
 
   private buildCurrentWorkspaceConfig() {
@@ -339,24 +550,18 @@ export class PiWorkspaceHub {
     sub: TopicSubscriptionState,
     deliveryKind: "initial" | "recovery",
   ): void {
-    const logicalFrame: WorkspaceConfigTopicFrame = {
-      topic: sub.topic,
-      subscriptionId: sub.subscriptionId,
-      fromSeq: 0,
-      toSeq: bucket.workspaceConfigSeq,
-      sentAt: Date.now(),
-      payload: {
-        kind: "snapshot",
-        snapshot: createWorkspaceConfigSnapshot({
-          workspaceId: bucket.workspaceKey,
-          logEpoch: bucket.workspaceConfigLogEpoch,
-          config: this.buildCurrentWorkspaceConfig(),
-        }),
-      },
-    };
-    for (const wire of encodeV4TopicFrames(logicalFrame, sub, deliveryKind)) {
-      bucket.workspaceConfigFrameEmitter.fire(wire);
-    }
+    const snapshot = createWorkspaceConfigSnapshot({
+      workspaceId: bucket.workspaceKey,
+      logEpoch: bucket.workspaceConfigLogEpoch,
+      config: this.buildCurrentWorkspaceConfig(),
+    });
+    emitWorkspaceConfigSnapshotFrames(
+      sub,
+      snapshot,
+      bucket.workspaceConfigSeq,
+      deliveryKind,
+      (wire) => bucket.workspaceConfigFrameEmitter.fire(wire),
+    );
   }
 
   private emitRuntimeLifecycle(
@@ -377,8 +582,14 @@ export class PiWorkspaceHub {
   }
 
   private async disposeBucket(bucket: PiWorkspaceBucket): Promise<void> {
+    bucket.disposed = true;
+    bucket.watcherDispose?.();
+    bucket.watcherDispose = null;
+    for (const timer of bucket.deferredTimers) clearTimeout(timer);
+    bucket.deferredTimers.clear();
     const controllers = [...bucket.sessions.values()];
     bucket.sessions.clear();
+    bucket.diskSessions.clear();
     bucket.sessionsIndexSubs.clear();
     bucket.workspaceConfigSubs.clear();
     this.emitRuntimeLifecycle(bucket, "unavailable");

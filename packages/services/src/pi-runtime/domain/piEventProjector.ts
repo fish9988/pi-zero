@@ -28,6 +28,7 @@ import {
   buildTurnHeaderRow,
   buildUserInputRow,
 } from "#src/pi-runtime/domain/piRowBuilders.js";
+import { createHydratedConversationSnapshot } from "#src/pi-runtime/domain/piArchiveSnapshotFactory.js";
 import {
   computeInputRouting,
   computeSessionAvailability,
@@ -36,6 +37,7 @@ import {
   deriveSessionTitle,
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
+import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import { reducePiStreamEvent } from "#src/pi-runtime/domain/piStreamEventReducer.js";
 import {
   buildTurnSettlementDeltas,
@@ -82,19 +84,48 @@ export class PiEventProjector {
     contextWindowMax?: number | undefined;
     title?: string | undefined;
     titleSource?: "default" | "generated" | "custom" | undefined;
+    hydrated?: HydratedPiSessionResult | undefined;
+    readOnlyArchive?:
+      | { readonly snapshot: ConversationSnapshot; readonly rows: readonly WireConversationRow[] }
+      | undefined;
   }) {
-    const initialSnapshot = createInitialConversationSnapshot(input);
+    const initialRows = input.readOnlyArchive
+      ? [...input.readOnlyArchive.rows]
+      : input.hydrated
+        ? [...input.hydrated.rows]
+        : [];
+    const initialSnapshot = input.readOnlyArchive
+      ? input.readOnlyArchive.snapshot
+      : input.hydrated
+        ? createHydratedConversationSnapshot({
+            sessionId: input.sessionId,
+            logEpoch: input.logEpoch,
+            attemptId: input.attemptId,
+            phase: input.hydrated.phase,
+            config: input.hydrated.config,
+            title: input.hydrated.title,
+            titleSource: input.hydrated.titleSource,
+            usage: input.hydrated.usage,
+            rows: initialRows,
+          })
+        : createInitialConversationSnapshot(input);
+    for (const row of initialRows) {
+      this.rowIndexById.set(row.rowId, this.allRows.length);
+      this.allRows.push(row);
+    }
+    const maxRowId = initialRows.reduce((max, row) => Math.max(max, row.rowId), 0);
+    const turnCount = initialRows.filter((row) => row.kind === "turnHeader").length;
     this.state = {
       workspacePath: input.workspacePath ?? "",
       snapshot: initialSnapshot,
-      nextRowId: 0,
-      turnCounter: 0,
+      nextRowId: maxRowId,
+      turnCounter: turnCount,
       responseCounter: 0,
       segmentCounter: 0,
       admissionCounter: 0,
       agentLifecycleSeq: 0,
-      contextWindowMax: input.contextWindowMax ?? 0,
-      lastAssistantPreview: undefined,
+      contextWindowMax: input.hydrated?.contextWindowMax ?? input.contextWindowMax ?? 0,
+      lastAssistantPreview: input.hydrated?.lastAssistantPreview,
       activeTurnId: null,
       activeTurnHeaderRowId: null,
       activeTurnStartedAt: 0,
@@ -114,7 +145,7 @@ export class PiEventProjector {
       toolCallsByCallId: new Map(),
       toolCallIdByContentIndex: new Map(),
       turnFileChanges: new Map(),
-      fileChangesByTurnId: new Map(),
+      fileChangesByTurnId: new Map(input.hydrated?.fileChangesByTurnId ?? []),
       getRowById: (rowId) => this.getRowById(rowId),
     };
   }

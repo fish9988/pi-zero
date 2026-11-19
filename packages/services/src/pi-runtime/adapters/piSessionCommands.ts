@@ -502,6 +502,22 @@ export async function dispatchPiAuxCommand(
       return ack;
     }
 
+    case "stop": {
+      host.broadcastCommit(projector.markStopping());
+      const liveClient = host.getLiveClient();
+      if (liveClient) {
+        await liveClient.clearQueue().catch(() => {});
+        await liveClient.abort().catch(() => {});
+      } else {
+        host.broadcastCommit(projector.settleAfterStopWithoutProcess(Date.now()));
+      }
+      return createCommandAck({
+        commandId: envelope.commandId,
+        status: "accepted",
+        revisionAtDecision: projector.getRevision(),
+      });
+    }
+
     case "renameSession": {
       const { title } = envelope.payload as CommandPayloadMap["renameSession"];
       host.broadcastCommit(projector.applyRename(title));

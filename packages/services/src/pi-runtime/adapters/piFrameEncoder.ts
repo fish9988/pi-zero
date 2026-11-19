@@ -8,8 +8,16 @@ import {
   type ConversationSnapshot,
   type ConversationTopicFrame,
   type ConversationTopicWireCandidate,
+  type SessionsIndexSnapshot,
+  type SessionsIndexTopicFrame,
+  type SessionsIndexTopicWireCandidate,
+  type SessionSummary,
   type TopicFrameDeliveryKind,
   type TopicWireFrame,
+  type WorkspaceConfigSnapshot,
+  type WorkspaceConfigState,
+  type WorkspaceConfigTopicFrame,
+  type WorkspaceConfigTopicWireCandidate,
 } from "@zcode/shared/zcode-protocol-v4";
 
 export interface TopicSubscriptionState {
@@ -68,6 +76,92 @@ export function emitConversationDeltaFrames(
       toSeq: commit.toSeq,
       sentAt,
       payload: { kind: "deltas", deltas: [...commit.deltas] },
+    };
+    for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
+      emit(wire);
+    }
+  }
+}
+
+export type PiSessionsIndexDeltaItem =
+  | { op: "session.upserted"; session: SessionSummary }
+  | { op: "session.removed"; sessionId: string };
+
+export function emitSessionsIndexSnapshotFrames(
+  sub: TopicSubscriptionState,
+  snapshot: SessionsIndexSnapshot,
+  toSeq: number,
+  deliveryKind: "initial" | "recovery",
+  emit: (wire: SessionsIndexTopicWireCandidate) => void,
+): void {
+  const logicalFrame: SessionsIndexTopicFrame = {
+    topic: sub.topic,
+    subscriptionId: sub.subscriptionId,
+    fromSeq: 0,
+    toSeq,
+    sentAt: Date.now(),
+    payload: { kind: "snapshot", snapshot },
+  };
+  for (const wire of encodeV4TopicFrames(logicalFrame, sub, deliveryKind)) {
+    emit(wire);
+  }
+}
+
+export function emitSessionsIndexDeltaFrames(
+  subscriptions: Iterable<TopicSubscriptionState>,
+  commit: { fromSeq: number; toSeq: number; deltas: readonly PiSessionsIndexDeltaItem[] },
+  sentAt: number,
+  emit: (wire: SessionsIndexTopicWireCandidate) => void,
+): void {
+  for (const sub of subscriptions) {
+    const logicalFrame: SessionsIndexTopicFrame = {
+      topic: sub.topic,
+      subscriptionId: sub.subscriptionId,
+      fromSeq: commit.fromSeq,
+      toSeq: commit.toSeq,
+      sentAt,
+      payload: { kind: "deltas", deltas: [...commit.deltas] },
+    };
+    for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
+      emit(wire);
+    }
+  }
+}
+
+export function emitWorkspaceConfigSnapshotFrames(
+  sub: TopicSubscriptionState,
+  snapshot: WorkspaceConfigSnapshot,
+  toSeq: number,
+  deliveryKind: "initial" | "recovery",
+  emit: (wire: WorkspaceConfigTopicWireCandidate) => void,
+): void {
+  const logicalFrame: WorkspaceConfigTopicFrame = {
+    topic: sub.topic,
+    subscriptionId: sub.subscriptionId,
+    fromSeq: 0,
+    toSeq,
+    sentAt: Date.now(),
+    payload: { kind: "snapshot", snapshot },
+  };
+  for (const wire of encodeV4TopicFrames(logicalFrame, sub, deliveryKind)) {
+    emit(wire);
+  }
+}
+
+export function emitWorkspaceConfigDeltaFrames(
+  subscriptions: Iterable<TopicSubscriptionState>,
+  commit: { fromSeq: number; toSeq: number; config: WorkspaceConfigState },
+  sentAt: number,
+  emit: (wire: WorkspaceConfigTopicWireCandidate) => void,
+): void {
+  for (const sub of subscriptions) {
+    const logicalFrame: WorkspaceConfigTopicFrame = {
+      topic: sub.topic,
+      subscriptionId: sub.subscriptionId,
+      fromSeq: commit.fromSeq,
+      toSeq: commit.toSeq,
+      sentAt,
+      payload: { kind: "deltas", deltas: [{ op: "config.updated", config: commit.config }] },
     };
     for (const wire of encodeV4TopicFrames(logicalFrame, sub, "online")) {
       emit(wire);

@@ -29,6 +29,7 @@ import type {
 import type { PiAgentService, PiAgentServiceOptions } from "#src/pi-runtime/contract.js";
 import { createCommandAck } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
+import { buildDiskSummaryLegacySessionInfo } from "#src/pi-runtime/adapters/piSessionHydration.js";
 import { createPiUnsupportedAgentMethods } from "#src/pi-runtime/adapters/piUnsupportedMethods.js";
 import { PiWorkspaceHub, commandCacheKey } from "#src/pi-runtime/adapters/piWorkspaceHub.js";
 
@@ -135,29 +136,36 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       const bucket = hub.getOrCreateWorkspace(params);
       const controller =
         bucket.sessions.get(params.sessionId) ??
-        hub.createSessionController(bucket, {
-          sessionId: params.sessionId,
-          modelSelection: params.model,
-          thoughtLevel: params.thoughtLevel,
-        });
+        (await hub.hydrateOrOpenSession(bucket, params.sessionId));
       return controller.getLegacySnapshot();
     },
 
     async listSessions(params) {
-      const bucket = hub.getWorkspace(params);
-      if (!bucket) return [];
+      const bucket = hub.getOrCreateWorkspace(params);
+      await hub.ensureInitialDiskScan(bucket);
+      const summaries = hub.getMergedPublishedSummaries(bucket);
       const result: ZCodeSessionInfo[] = [];
-      for (const controller of bucket.sessions.values()) {
-        if (!controller.isPublishedToIndex()) continue;
-        if (params.sessionIds && !params.sessionIds.includes(controller.sessionId)) continue;
-        result.push(controller.getLegacySnapshot().session);
+      for (const summary of summaries) {
+        if (params.sessionIds && !params.sessionIds.includes(summary.sessionId)) continue;
+        const live = bucket.sessions.get(summary.sessionId);
+        result.push(
+          live
+            ? live.getLegacySnapshot().session
+            : buildDiskSummaryLegacySessionInfo(
+                summary,
+                bucket.workspacePath,
+                bucket.workspaceIdentity,
+              ),
+        );
       }
       return typeof params.limit === "number" ? result.slice(0, params.limit) : result;
     },
 
     async readSession(params) {
-      const controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
-      if (!controller) throw new Error(`Pi session not found: ${params.sessionId}`);
+      const bucket = hub.getOrCreateWorkspace(params);
+      const controller =
+        bucket.sessions.get(params.sessionId) ??
+        (await hub.hydrateOrOpenSession(bucket, params.sessionId));
       return controller.getLegacySnapshot();
     },
 
@@ -204,7 +212,7 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       const bucket = hub.getOrCreateWorkspace(params);
       const controller =
         bucket.sessions.get(params.sessionId) ??
-        hub.createSessionController(bucket, { sessionId: params.sessionId });
+        (await hub.hydrateOrOpenSession(bucket, params.sessionId));
       const ack = controller.subscribe(hub.nextSubscriptionId("pi_conv"));
       return { ack };
     },
@@ -230,7 +238,11 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     },
 
     async conversationRowsRangeV4(params) {
-      const controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
+      let controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
+      if (!controller && params.residency !== "resident-only") {
+        const bucket = hub.getOrCreateWorkspace(params);
+        controller = (await hub.tryHydrateDiskSession(bucket, params.sessionId)) ?? undefined;
+      }
       if (!controller) {
         if (params.residency === "resident-only") throw new Error("proto.sessionNotResident");
         return { rows: [], atSeq: 0, atRevision: 0, atLogEpoch: "pi-empty", hasMore: false };
@@ -239,7 +251,11 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     },
 
     async conversationFileChangesV4(params) {
-      const controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
+      let controller = hub.getWorkspace(params)?.sessions.get(params.sessionId);
+      if (!controller) {
+        const bucket = hub.getOrCreateWorkspace(params);
+        controller = (await hub.tryHydrateDiskSession(bucket, params.sessionId)) ?? undefined;
+      }
       if (!controller) return { files: 0, additions: 0, deletions: 0, items: [] };
       return controller.getTurnFileChanges(params.target);
     },
@@ -322,7 +338,9 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       }
 
       const sessionId = envelope.sessionId;
-      const controller = sessionId ? bucket.sessions.get(sessionId) : undefined;
+      const controller = sessionId
+        ? (bucket.sessions.get(sessionId) ?? (await hub.tryHydrateDiskSession(bucket, sessionId)))
+        : undefined;
       if (!controller) {
         return createCommandAck({
           commandId: envelope.commandId,
@@ -367,6 +385,7 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       const bucket = hub.getOrCreateWorkspace(params);
       const controller =
         bucket.sessions.get(params.sessionId) ??
+        (await hub.tryHydrateDiskSession(bucket, params.sessionId)) ??
         hub.createSessionController(bucket, { sessionId: params.sessionId });
       await controller.ensureReady();
     },
@@ -391,31 +410,15 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     },
 
     async reconcileSessionsIndexV4(params) {
-      const bucket = hub.getWorkspace(params);
-      return {
-        sessions: params.sessionIds.map((sessionId) => {
-          const controller = bucket?.sessions.get(sessionId);
-          if (!controller || !controller.isPublishedToIndex()) {
-            return { sessionId, exists: false as const, deleted: false as const };
-          }
-          const summary = controller.getSummary();
-          return {
-            sessionId,
-            exists: true as const,
-            deleted: false,
-            ...(summary.parentSessionId ? { parentSessionId: summary.parentSessionId } : {}),
-            title: summary.title,
-            titleSource: summary.titleSource ?? "default",
-            createdAt: summary.createdAt,
-            updatedAt: summary.lastActivityAt,
-            ...(summary.lastOutcome ? { lastOutcome: summary.lastOutcome } : {}),
-          };
-        }),
-      };
+      return hub.reconcileSessionsIndex(params, params.sessionIds);
     },
 
     async subscribeSessionsIndexV4(params) {
-      return { ack: hub.subscribeSessionsIndex(params) };
+      return {
+        ack: await hub.subscribeSessionsIndex(params, {
+          subscriberScope: params.subscriberScope,
+        }),
+      };
     },
 
     async resyncSessionsIndexV4(params) {
