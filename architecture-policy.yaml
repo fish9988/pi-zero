@@ -14,6 +14,25 @@ modules:
     layers:
       adapters: .
     owner: runtime
+  # pi-runtime：原生 Pi（@earendil-works/pi-coding-agent v1.5.2+）CLI 发现、RPC 传输与进程生命周期托管
+  - id: pi-runtime
+    roots:
+      - packages/services/src/pi-runtime
+    managed: true
+    requires:
+      - agent-crash-diagnostic
+      - services
+      - windows-runtime-host
+    publicEntrypoints:
+      - packages/services/src/pi-runtime/index.ts
+      - packages/services/src/pi-runtime/contract.ts
+    layers:
+      domain: domain
+      adapters: adapters
+    layerOrder:
+      - domain
+      - adapters
+    owner: runtime
   - id: session-control
     roots: [ packages/session-control/src, packages/session-control/vitest.config.ts ]
     managed: true

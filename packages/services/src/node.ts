@@ -47,6 +47,10 @@ import { createGitWorktreeRepo } from "#src/git/managed-worktree/index.js";
 import { createGitCommandProvider } from "#src/git/providers/gitCommandProvider.js";
 import { HOST_WORKTREE_COMMAND } from "#src/zcode-agent/zcodeAgent.js";
 import { createTaskGroupService, ITaskGroupService, groupTaskKey } from "#src/task-groups/index.js";
+import {
+  disposeAllPiProcesses,
+  disposeAllPiProcessesAndWait,
+} from "#src/pi-runtime/index.js";
 import { IGenUiService } from "./gen-ui/contract.js";
 import { createGenUiService } from "./gen-ui/node.js";
 // import { channelReplyHostRequestSchema, channelReplyResultSchema } from "@zcode/shared";
@@ -3534,6 +3538,7 @@ export function disposeServiceResources(services: ServiceCollection): void {
       service.disposeAll();
     }
   }
+  disposeAllPiProcesses();
 
   // 同步 best-effort：终止托管的 Computer Use Helper（不 await，避免阻断同步 dispose 路径）。
   const managedCuaHelperHost = managedCuaHelperHosts.get(services);
@@ -3559,8 +3564,17 @@ export async function disposeServiceResourcesAndWait(services: ServiceCollection
   // app 关闭时 host 需要等 agent 进程树完成 graceful + force 清理。
   // 旧的同步 dispose 会在 host 退出时丢掉强杀 timer，导致 zcode-cli/app-server 变成孤儿进程。
   // CLI 的 EOF 宽限不能被云内容或终端清理消耗；先关闭 Agent admission 并完成进程回收。
+  const agentService = services.getOptional(IZCodeAgentService);
+  if (agentService) {
+    if (hasDisposeAllAndWait(agentService)) {
+      await agentService.disposeAllAndWait();
+    } else if (hasDisposeAll(agentService)) {
+      agentService.disposeAll();
+    }
+  }
+  await disposeAllPiProcessesAndWait();
+
   const disposableServices = [
-    services.getOptional(IZCodeAgentService),
     services.getOptional(ICloudContentService),
     services.getOptional(ITerminalService),
     services.getOptional(IZCodeTaskService),
