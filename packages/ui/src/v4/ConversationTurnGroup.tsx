@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -80,8 +81,14 @@ import {
   getActiveAssistantSummaryItem,
   getAssistantSummaryIconItem,
   getAssistantSummaryChangeFiles,
+  hasWorkProcessActivity,
+  sliceVisibleProcessItems,
+  summarizeWorkProcess,
   type ConversationAssistantWorkRenderItem,
+  type WorkProcessSummary,
 } from "@/v4/conversationAssistantWorkItems.js";
+import { useBottomFollowingScroll } from "@/mentions/components/scrollMask.js";
+import { formatRunningWorkDuration } from "@/lib/workDuration.js";
 import { ConversationAgentToolCallRow } from "@/v4/ConversationAgentToolCallRow.js";
 import { ConversationFileSummaryPanel } from "@/v4/ConversationFileSummaryPanel.js";
 import {
@@ -265,6 +272,35 @@ function useConversationAssistantWorkItems(
 function ConversationAssistantWorkItems({
   rows,
   stageTailIsRunning = false,
+  historyContainer,
+  ...props
+}: {
+  rows: readonly AssistantWorkRow[];
+  stageTailIsRunning?: boolean;
+} & Omit<React.ComponentProps<typeof ConversationAssistantWorkContent>, "items">) {
+  // 性能：过程窗收起时直接跳过投影与子节点构建，避免历史长任务（50~100+ 步）在后台堆积 DOM。
+  if (historyContainer && !historyContainer.open) {
+    return (
+      <CollapsibleContent
+        className="-mx-1 -mb-1 px-1 pb-1"
+        data-testid={testId(TID_CHAT_ASSISTANT_HISTORY_CONTENT, historyContainer.chunkKey)}
+        data-history-open="false"
+      />
+    );
+  }
+  return (
+    <ConversationAssistantWorkItemsMounted
+      rows={rows}
+      stageTailIsRunning={stageTailIsRunning}
+      historyContainer={historyContainer}
+      {...props}
+    />
+  );
+}
+
+function ConversationAssistantWorkItemsMounted({
+  rows,
+  stageTailIsRunning = false,
   ...props
 }: {
   rows: readonly AssistantWorkRow[];
@@ -272,6 +308,63 @@ function ConversationAssistantWorkItems({
 } & Omit<React.ComponentProps<typeof ConversationAssistantWorkContent>, "items">) {
   const items = useConversationAssistantWorkItems(rows, props.context, stageTailIsRunning);
   return <ConversationAssistantWorkContent items={items} {...props} />;
+}
+
+const PROCESS_WINDOW_ITEM_STYLE: React.CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 28px",
+};
+
+function BoundedProcessScrollList({
+  items,
+  active,
+  renderItem,
+}: {
+  items: readonly ConversationAssistantWorkRenderItem[];
+  active: boolean;
+  renderItem: (item: ConversationAssistantWorkRenderItem) => React.ReactNode;
+}) {
+  const { locale } = useZCodeIntl();
+  const isZh = locale.toLowerCase().startsWith("zh");
+  const [showAllSteps, setShowAllSteps] = useState(false);
+  const { visibleItems, hiddenCount } = useMemo(
+    () => sliceVisibleProcessItems(items, showAllSteps),
+    [items, showAllSteps],
+  );
+  const scroll = useBottomFollowingScroll(active, items.length);
+
+  return (
+    <div
+      ref={scroll.scrollRef}
+      data-work-process-scroll="true"
+      data-scroll-mask={scroll.maskData}
+      onScroll={scroll.onScroll}
+      style={scroll.maskStyle}
+      className="max-h-[340px] overflow-y-auto pr-1 text-ui-base"
+    >
+      <div
+        ref={scroll.contentRef}
+        className="relative ml-1.5 flex flex-col gap-1.5 border-l border-[var(--color-border)]/60 py-0.5 pl-3.5"
+        data-conversation-work-items="process-window"
+      >
+        {hiddenCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowAllSteps(true)}
+            className="self-start rounded-md px-2 py-0.5 text-ui-xs text-foreground-subtle transition-colors hover:bg-hover hover:text-foreground"
+            data-work-process-expand-earlier="true"
+          >
+            {isZh ? `展开更早的 ${hiddenCount} 条步骤` : `Show ${hiddenCount} earlier steps`}
+          </button>
+        ) : null}
+        {visibleItems.map((item) => (
+          <div key={item.key} style={PROCESS_WINDOW_ITEM_STYLE} className="min-w-0">
+            {renderItem(item)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ConversationAssistantWorkContent({
@@ -284,11 +377,15 @@ function ConversationAssistantWorkContent({
   context: ConversationRowRenderContext;
   /** running turn 的正文可能暂时落在 history renderer，仍需隐藏特化协议原文。 */
   assistantCodeCommentProjectionEnabled?: boolean;
-  historyContainer?: { chunkKey: string; open: boolean };
+  historyContainer?: { chunkKey: string; open: boolean; processWindow?: boolean };
 }) {
   const { intl } = useZCodeIntl();
   const summaryBoundary = useContext(SummaryGroupBoundaryContext);
-  const groups = useMemo(() => groupConsecutiveAssistantSummaries(items), [items]);
+  const useProcessWindow = historyContainer?.processWindow === true;
+  const groups = useMemo(
+    () => (useProcessWindow ? [] : groupConsecutiveAssistantSummaries(items)),
+    [items, useProcessWindow],
+  );
   const groupKeys = useContinuousGroupKeys(groups, (group) => ({
     kind: "summary",
     rowIds: group.items.map((item) => item.row.rowId),
@@ -313,6 +410,25 @@ function ConversationAssistantWorkContent({
     ) : (
       <ConversationAgentToolCallRow key={item.key} item={item} context={context} />
     );
+
+  if (historyContainer && useProcessWindow) {
+    return (
+      <CollapsibleContent
+        className="-mx-1 -mb-1 px-1 pb-1"
+        data-testid={testId(TID_CHAT_ASSISTANT_HISTORY_CONTENT, historyContainer.chunkKey)}
+        data-history-open={String(historyContainer.open)}
+      >
+        <div className="pt-2">
+          <BoundedProcessScrollList
+            items={items}
+            active={historyContainer.open}
+            renderItem={renderItem}
+          />
+        </div>
+      </CollapsibleContent>
+    );
+  }
+
   const content = (
     <div className="flex flex-col gap-1" data-conversation-work-items>
       {groups.map((group, index) => {
@@ -537,6 +653,34 @@ function OffPeakTurnCards({
   );
 }
 
+function LiveRunningDuration({ initialElapsedMs }: { initialElapsedMs: number }) {
+  const { intl, locale } = useZCodeIntl();
+  const safeInitial = Math.max(0, initialElapsedMs);
+  const startedAtRef = useRef<number>(Date.now() - safeInitial);
+  const [elapsedMs, setElapsedMs] = useState(safeInitial);
+
+  useEffect(() => {
+    const currentEstimate = Math.max(0, Date.now() - startedAtRef.current);
+    if (Math.abs(safeInitial - currentEstimate) > 2500) {
+      startedAtRef.current = Date.now() - safeInitial;
+      setElapsedMs(safeInitial);
+    }
+  }, [safeInitial]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setElapsedMs(Math.max(0, Date.now() - startedAtRef.current));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <span className="shrink-0 tabular-nums text-foreground-subtlest">
+      {formatRunningWorkDuration(elapsedMs, intl.formatMessage, locale)}
+    </span>
+  );
+}
+
 function AssistantHistoryStatus({
   segment,
   open,
@@ -544,6 +688,9 @@ function AssistantHistoryStatus({
   highspeedMeta,
   sourceCommandIds,
   collapsible = true,
+  canToggle,
+  runningProcess = false,
+  processSummary,
 }: {
   segment: ConversationTurnWorkSegment;
   open: boolean;
@@ -551,8 +698,12 @@ function AssistantHistoryStatus({
   highspeedMeta?: HighspeedMessageMeta;
   sourceCommandIds: readonly string[];
   collapsible?: boolean;
+  canToggle?: boolean;
+  runningProcess?: boolean;
+  processSummary?: WorkProcessSummary;
 }) {
   const { intl, locale } = useZCodeIntl();
+  const isZh = locale.toLowerCase().startsWith("zh");
   const topicInterrupted = useBotTopicInterruption(sourceCommandIds);
   const durationLabel = formatConversationWorkDuration(
     segment.workStatus?.durationMs,
@@ -565,21 +716,40 @@ function AssistantHistoryStatus({
     highspeedMeta.savedDurationMs > 0
       ? formatConversationWorkDuration(highspeedMeta.savedDurationMs, intl, locale)
       : null;
+  const stepCount = processSummary?.stepCount ?? 0;
   const label =
     segment.workStatus?.state === "interrupted"
-      ? intl.formatMessage({
-          id: topicInterrupted ? "chat.history.topicInterrupted" : "chat.history.stopped",
-        })
+      ? stepCount > 0
+        ? `${intl.formatMessage({
+            id: topicInterrupted ? "chat.history.topicInterrupted" : "chat.history.stopped",
+          })} · ${isZh ? `已执行 ${stepCount} 步` : `${stepCount} steps`}${durationLabel ? ` · ${durationLabel}` : ""}`
+        : intl.formatMessage({
+            id: topicInterrupted ? "chat.history.topicInterrupted" : "chat.history.stopped",
+          })
       : segment.workStatus?.state === "running"
-        ? intl.formatMessage({ id: "chat.history.workingFor" }, { duration: durationLabel ?? "" })
-        : durationLabel
-          ? intl.formatMessage({ id: "chat.history.workedFor" }, { duration: durationLabel })
-          : intl.formatMessage({ id: "chat.history.worked" });
+        ? (processSummary?.activeLabel ??
+          intl.formatMessage({ id: "chat.history.workingFor" }, { duration: durationLabel ?? "" }))
+        : stepCount > 0
+          ? isZh
+            ? durationLabel
+              ? `已完成 ${stepCount} 步 · 用时 ${durationLabel}`
+              : `已完成 ${stepCount} 步`
+            : durationLabel
+              ? `Completed ${stepCount} ${stepCount === 1 ? "step" : "steps"} · ${durationLabel}`
+              : `Completed ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
+          : durationLabel
+            ? intl.formatMessage({ id: "chat.history.workedFor" }, { duration: durationLabel })
+            : intl.formatMessage({ id: "chat.history.worked" });
 
   const Status = collapsible ? CollapsibleTrigger : "span";
+  const showChevron =
+    collapsible && (canToggle !== undefined ? canToggle : !segment.assistantHistoryDefaultOpen);
 
   return (
     <div
+      data-work-process-header={
+        runningProcess ? "running" : stepCount > 0 ? "completed" : undefined
+      }
       className={cn(
         "flex w-full flex-wrap items-center justify-between gap-2 border-b",
         highspeed ? "border-icon-purple/30 pb-3 pl-1" : "border-[var(--color-border)]/50 pb-2",
@@ -590,15 +760,35 @@ function AssistantHistoryStatus({
           collapsible ? testId(TID_CHAT_ASSISTANT_HISTORY_TRIGGER, segment.key) : undefined
         }
         data-history-open={collapsible ? String(open) : undefined}
-        className="group/history-message inline-flex max-w-full items-center gap-2 text-left text-ui-base text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-input-border-focused)]"
+        className="group/history-message inline-flex max-w-full cursor-pointer items-center gap-2 text-left text-ui-base text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-input-border-focused)]"
       >
+        {runningProcess ? (
+          <span
+            aria-hidden
+            className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--color-primary,#c96442)]"
+          />
+        ) : null}
         <span
-          className={cn("truncate", highspeed && "font-medium leading-5 text-icon-purple")}
+          className={cn(
+            "min-w-0 truncate",
+            runningProcess && "animated-gradient-text animated-gradient-text-foreground",
+            highspeed && "font-medium leading-5 text-icon-purple",
+          )}
           data-highspeed-duration={highspeed ? "true" : undefined}
         >
           {label}
         </span>
-        {collapsible && !segment.assistantHistoryDefaultOpen ? (
+        {runningProcess ? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-ui-sm text-foreground-subtlest">
+            <LiveRunningDuration initialElapsedMs={segment.workStatus?.durationMs ?? 0} />
+            {stepCount > 1 ? (
+              <span className="tabular-nums">
+                · {isZh ? `${stepCount} 步` : `${stepCount} steps`}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {showChevron ? (
           <ChevronRightIcon
             aria-hidden
             className={cn(
@@ -710,6 +900,7 @@ function ConversationWorkSegmentFlow({
   highspeedMeta?: HighspeedMessageMeta;
 }) {
   // 外层过程收纳由工作段独立控制，不能由内部工具分组隐藏入口或强制展开。
+  const { locale } = useZCodeIntl();
   const [historyOpen, setHistoryOpen] = useState(segment.assistantHistoryDefaultOpen);
   const flowItemKeys = useContinuousGroupKeys(segment.flowItems, (item) =>
     item.kind === "userInput" || item.kind === "assistantText"
@@ -720,20 +911,35 @@ function ConversationWorkSegmentFlow({
     setHistoryOpen(segment.assistantHistoryDefaultOpen);
   }, [segment.assistantHistoryDefaultOpen, segment.key]);
 
-  // 恢复外层收纳时曾覆盖 staging 的去重条件，导致 Working 标题与 ChatLoading 同时显示。
-  // 整轮运行中只保留加载提示，过程内容展开；内部工具分组仍独立管理自己的收纳。
+  const hasProcessActivity = useMemo(
+    () => hasWorkProcessActivity(segment.assistantHistoryRows),
+    [segment.assistantHistoryRows],
+  );
+  const processSummary = useMemo(
+    () =>
+      hasProcessActivity ? summarizeWorkProcess(segment.assistantHistoryRows, locale) : undefined,
+    [hasProcessActivity, locale, segment.assistantHistoryRows],
+  );
+  const runningProcess =
+    turnRunning && hasProcessActivity && segment.workStatus?.state === "running";
+  // 有工具/思考步骤的工作段：运行中展示定高过程窗顶部状态栏（当前步骤 + 计时 + 可手动折叠），
+  // 完成后自动收起成一行「已完成 N 步 · 用时 X」；纯文本问答保持无外壳裸流。
   const shouldShowHistoryStatus =
-    !turnRunning && segment.workStatus !== undefined && segment.workStatus.state !== "running";
+    segment.workStatus !== undefined &&
+    (runningProcess || (!turnRunning && segment.workStatus.state !== "running"));
   const firstAssistantFlowItemIndex = segment.flowItems.findIndex(
     (item) => item.kind !== "userInput",
   );
   let historyChunkIndex = 0;
-  const open = turnRunning || segment.assistantHistoryDefaultOpen || historyOpen;
+  const canToggle = hasProcessActivity || (!turnRunning && !segment.assistantHistoryDefaultOpen);
+  const open = hasProcessActivity
+    ? historyOpen
+    : turnRunning || segment.assistantHistoryDefaultOpen || historyOpen;
 
   return (
     <Collapsible
       open={open}
-      onOpenChange={turnRunning || segment.assistantHistoryDefaultOpen ? undefined : setHistoryOpen}
+      onOpenChange={canToggle ? setHistoryOpen : undefined}
       // 外层 flex gap 不属于 Radix 测量的 content 高度，收起到 0 后会在
       // display:none 的最后一帧再少 20px。普通兄弟用外边距保持原盒模型，history
       // 的间距则放进动画层。
@@ -762,7 +968,7 @@ function ConversationWorkSegmentFlow({
               rows={item.rows}
               context={context}
               assistantCodeCommentProjectionEnabled={assistantCodeCommentProjectionEnabled}
-              historyContainer={{ chunkKey, open }}
+              historyContainer={{ chunkKey, open, processWindow: hasProcessActivity }}
             />
           );
         } else if (item.kind === "assistantText") {
@@ -802,6 +1008,9 @@ function ConversationWorkSegmentFlow({
                 highspeed={highspeed}
                 highspeedMeta={highspeedMeta}
                 sourceCommandIds={sourceCommandIds}
+                canToggle={canToggle}
+                runningProcess={runningProcess}
+                processSummary={processSummary}
               />
             ) : null}
             {content}
@@ -815,6 +1024,9 @@ function ConversationWorkSegmentFlow({
           open={open}
           highspeed={highspeed}
           highspeedMeta={highspeedMeta}
+          canToggle={canToggle}
+          runningProcess={runningProcess}
+          processSummary={processSummary}
         />
       ) : null}
     </Collapsible>
@@ -925,6 +1137,11 @@ function ConversationTurnFlow({
   const latestAssistantTextRow = unit.latestAssistantTextRow;
   const canRetryLatestAssistant = latestAssistantTextRow?.actions?.canRetry === true;
   const canForkLatestAssistant = latestAssistantTextRow?.actions?.canFork === true;
+  const lastWorkSegment = workSegments.at(-1);
+  const hasRunningProcessHeader =
+    unit.isRunning &&
+    lastWorkSegment?.workStatus?.state === "running" &&
+    hasWorkProcessActivity(lastWorkSegment.assistantHistoryRows);
 
   // 即使恢复了 guide 的 row 全序，也不能让所有 history chunk 共享同一个
   // Collapsible。accepted guide 现在由 CLI workSegments 定界，每段组件自行维护折叠状态。
@@ -963,7 +1180,7 @@ function ConversationTurnFlow({
       ))}
       <TurnChatLoadingSlot
         apiRetry={apiRetry}
-        eligible={showLoading}
+        eligible={showLoading && !hasRunningProcessHeader}
         initialElapsedMs={unit.workStatus?.durationMs ?? 0}
       />
     </div>
@@ -1316,8 +1533,7 @@ function ConversationTurnGroupImpl({
   // 判据用 latestAssistantTextRow.state 而不是 unit.isRunning：回合可能还在跑
   // （模型说完一段正在调工具），但最新文本行已经终态，那时 copyText 仍须可用。
   const assistantTextTerminal =
-    latestAssistantTextRow?.state === "complete" ||
-    latestAssistantTextRow?.state === "interrupted";
+    latestAssistantTextRow?.state === "complete" || latestAssistantTextRow?.state === "interrupted";
   const assistantRawCopyText = useMemo(
     () => (assistantTextTerminal ? resolveAssistantCopyText(unit) : undefined),
     [

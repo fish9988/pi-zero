@@ -150,7 +150,9 @@ export function getAssistantSummaryToolCategory(
   )
     return "run";
   if (family === "file-write") return "change";
-  return null;
+  if (SUBAGENT_TOOL_NAMES.has(row.toolName)) return null;
+  // MCP 与 Pi 自定义扩展工具统一归入执行类，避免连续工具流被打断成孤立平铺行。
+  return "run";
 }
 
 /** 正文、Workflow、Subagent 与未归类工具是边界；不重新拼接真实工具关系。 */
@@ -331,4 +333,147 @@ export function getAssistantSummaryChangeFiles(
     }
   }
   return files.size ? { files: [...files.values()], unresolved } : undefined;
+}
+
+export const DEFAULT_VISIBLE_PROCESS_WINDOW_ITEMS = 40;
+
+export interface WorkProcessSummary {
+  readonly stepCount: number;
+  readonly activeLabel: string | null;
+}
+
+/** 只有包含工具调用、思考过程或子代理的工作段才进入定高过程窗，纯文本问答保持裸流展示。 */
+export function hasWorkProcessActivity(rows: readonly AssistantWorkRow[]): boolean {
+  return rows.some(
+    (row) => row.kind === "toolCall" || row.kind === "reasoning" || row.kind === "subagent",
+  );
+}
+
+function truncateProcessText(text: string, maxLength = 56): string {
+  const singleLine = text.replace(/\s+/gu, " ").trim();
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function readToolTargetLabel(row: ToolCallRow): string | null {
+  const input = toolCallRowToLegacyNode(row).toolCall.input;
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const record = input as Record<string, unknown>;
+    for (const key of [
+      "description",
+      "command",
+      "cmd",
+      "file_path",
+      "filePath",
+      "path",
+      "pattern",
+      "query",
+      "url",
+      "question",
+      "title",
+    ]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        const trimmed = value.trim();
+        if (key === "file_path" || key === "filePath" || key === "path") {
+          const base = trimmed.split(/[\\/]/u).filter(Boolean).at(-1);
+          return truncateProcessText(base || trimmed);
+        }
+        return truncateProcessText(trimmed);
+      }
+    }
+  }
+  return row.toolName.trim() ? truncateProcessText(row.toolName) : null;
+}
+
+function formatActiveToolProcessLabel(row: ToolCallRow, isZh: boolean): string {
+  const tool = toolCallRowToLegacyNode(row).toolCall;
+  const family = resolveToolCallIdentity(tool).family;
+  const target = readToolTargetLabel(row);
+  const verb =
+    family === "file-read"
+      ? isZh
+        ? "正在读取"
+        : "Reading"
+      : family === "file-write"
+        ? isZh
+          ? "正在编辑"
+          : "Editing"
+        : family === "search" || family === "explore" || family === "web-fetch"
+          ? isZh
+            ? "正在搜索"
+            : "Searching"
+          : family === "shell" || family === "node-repl"
+            ? isZh
+              ? "正在运行"
+              : "Running"
+            : isZh
+              ? "正在调用"
+              : "Calling";
+  return target ? `${verb} ${target}` : verb;
+}
+
+/** 汇总单轮工作过程步数与当前活动步骤标题，供定高过程窗顶部状态栏展示。 */
+export function summarizeWorkProcess(
+  rows: readonly AssistantWorkRow[],
+  locale = "zh-CN",
+): WorkProcessSummary {
+  const isZh = locale.toLowerCase().startsWith("zh");
+  let toolAndSubagentCount = 0;
+  let reasoningCount = 0;
+  let activeRow: AssistantWorkRow | undefined;
+  let lastToolOrReasoning: AssistantWorkRow | undefined;
+
+  for (const row of rows) {
+    if (row.kind === "toolCall") {
+      toolAndSubagentCount += 1;
+      lastToolOrReasoning = row;
+      if (row.status === "running" || row.status === "inputStreaming") {
+        activeRow = row;
+      }
+    } else if (row.kind === "subagent") {
+      toolAndSubagentCount += 1;
+      lastToolOrReasoning = row;
+      if (row.status === "running") {
+        activeRow = row;
+      }
+    } else if (row.kind === "reasoning") {
+      reasoningCount += 1;
+      lastToolOrReasoning = row;
+      if (row.state === "streaming") {
+        activeRow = row;
+      }
+    }
+  }
+
+  const stepCount = toolAndSubagentCount > 0 ? toolAndSubagentCount : reasoningCount;
+  const targetRow = activeRow ?? lastToolOrReasoning ?? rows.at(-1);
+  let activeLabel: string | null = null;
+  if (targetRow) {
+    if (targetRow.kind === "toolCall") {
+      activeLabel = formatActiveToolProcessLabel(targetRow, isZh);
+    } else if (targetRow.kind === "reasoning") {
+      activeLabel = isZh ? "正在思考" : "Thinking";
+    } else if (targetRow.kind === "subagent") {
+      activeLabel = isZh ? "正在执行子任务" : "Running subagent";
+    } else if (targetRow.kind === "assistantText") {
+      activeLabel = isZh ? "正在整理回复" : "Drafting response";
+    }
+  }
+  return { stepCount, activeLabel };
+}
+
+/** 长任务窗口切片：默认仅渲染尾部最近 N 条，避免 50~100+ 步长任务把 DOM 撑爆。 */
+export function sliceVisibleProcessItems<T>(
+  items: readonly T[],
+  showAll: boolean,
+  maxVisible = DEFAULT_VISIBLE_PROCESS_WINDOW_ITEMS,
+): { readonly visibleItems: readonly T[]; readonly hiddenCount: number } {
+  if (showAll || items.length <= maxVisible) {
+    return { visibleItems: items, hiddenCount: 0 };
+  }
+  return {
+    visibleItems: items.slice(-maxVisible),
+    hiddenCount: items.length - maxVisible,
+  };
 }
