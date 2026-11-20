@@ -86,6 +86,13 @@ jobs:
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
+      - name: Build Windows runtime host helpers
+        shell: pwsh
+        env:
+          ZCODE_TARGET_OS: win
+          ZCODE_TARGET_ARCH: x64
+        run: pnpm --filter @zcode/desktop run prepare:windows-runtime-host
+
       - name: Build desktop production bundle
         shell: pwsh
         run: pnpm run build:bootstrap
