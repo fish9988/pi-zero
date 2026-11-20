@@ -200,18 +200,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     visibility: "all",
   },
   {
-    id: "settings.officialPlans",
-    section: "modelProvider",
-    description: "settings.officialPlansDescription",
-    visibility: "all",
-  },
-  {
-    id: "settings.subscriptionUi",
-    section: "modelProvider",
-    description: "settings.subscriptionUiDescription",
-    visibility: "all",
-  },
-  {
     id: "settings.themeMode",
     section: "appearance",
     description: "settings.themeModeDescription",

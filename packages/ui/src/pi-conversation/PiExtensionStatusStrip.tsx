@@ -4,11 +4,10 @@
  * - 展示 Supermemory 召回计数、扩展开关状态等 TUI 独立信息；
  * - 无状态时渲染 null（0 占位高度），超出 3 条或包含多行 widget 时收敛至轻量 Popover。
  */
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { PiSessionExtensionUiSnapshot } from "@zcode/shared/pi-config";
 import { Layers, Sparkles } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
-import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -25,7 +24,6 @@ export const PiExtensionStatusStrip = memo(function PiExtensionStatusStrip({
   const isZh = locale.toLowerCase().startsWith("zh");
   const tr = (zh: string, en: string) => (isZh ? zh : en);
   const [state, setState] = useState<PiSessionExtensionUiSnapshot | null>(null);
-  const lastSeenNotifyIdRef = useRef<string | null>(null);
 
   const fetchState = useCallback(async () => {
     if (!service || !sessionId) {
@@ -36,11 +34,6 @@ export const PiExtensionStatusStrip = memo(function PiExtensionStatusStrip({
       const res = await service.runSessionAction({ op: "getExtensionUiState", sessionId });
       if (res.op === "getExtensionUiState") {
         setState(res.state);
-        const notif = res.state.lastNotification;
-        if (notif && notif.id !== lastSeenNotifyIdRef.current) {
-          lastSeenNotifyIdRef.current = notif.id;
-          toast(notif.message);
-        }
       }
     } catch {
       // ignore transient RPC errors
@@ -48,7 +41,6 @@ export const PiExtensionStatusStrip = memo(function PiExtensionStatusStrip({
   }, [service, sessionId]);
 
   useEffect(() => {
-    lastSeenNotifyIdRef.current = null;
     void fetchState();
     if (!service || !sessionId) return;
     const sub = service.onDidChange((event) => {

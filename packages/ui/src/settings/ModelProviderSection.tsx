@@ -1183,14 +1183,6 @@ export function ModelProviderSection({
           })}
         </p>
       ) : null}
-      {sharedSettings?.officialPlansEnabled === false &&
-      selectedNavItem &&
-      selectedNavItem.type !== "custom" &&
-      !templatePickerOpen ? (
-        <div className="mb-4 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-ui-base text-foreground-subtle">
-          {intl.formatMessage({ id: "settings.officialPlans.disabledHint" })}
-        </div>
-      ) : null}
       {templatePickerOpen ? (
         <ProviderTemplatePicker
           templates={providerTemplates.filter(

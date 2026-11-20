@@ -50,15 +50,19 @@ export interface PiSessionCommandHost {
     readonly contextWindow?: number | undefined;
   }>;
   applyModeSwitch(mode: string): Promise<void>;
-  startFreshTurn(input: {
-    commandId: string;
-    clientId: string;
-    text: string;
-    attachments?: UserInputRow["attachments"] | undefined;
-    conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
-    modelSelection?: ModelSelection | undefined;
-    inputOrigin?: "desktop" | "mobile" | undefined;
-  }): Promise<CommandAck>;
+  startFreshTurn(
+    input: {
+      commandId: string;
+      clientId: string;
+      text: string;
+      attachments?: UserInputRow["attachments"] | undefined;
+      conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
+      modelSelection?: ModelSelection | undefined;
+      inputOrigin?: "desktop" | "mobile" | undefined;
+    },
+    options?: { readonly nonBlocking?: boolean | undefined },
+  ): Promise<CommandAck>;
+  waitForInFlightPromptDispatch(): Promise<void>;
   handleEditUserQuery(
     commandId: string,
     clientId: string,
@@ -152,13 +156,18 @@ export async function dispatchPiSendText(
       const liveClient = host.getLiveClient();
       if (liveClient) await liveClient.clearQueue().catch(() => {});
     }
-    return host.startFreshTurn({
-      commandId: envelope.commandId,
-      clientId: envelope.clientId,
-      text: payload.text,
-      modelSelection: payload.modelSelection,
-      inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
-    });
+    return host.startFreshTurn(
+      {
+        commandId: envelope.commandId,
+        clientId: envelope.clientId,
+        text: payload.text,
+        attachments: payload.attachments,
+        conversationQuotes: payload.conversationQuotes,
+        modelSelection: payload.modelSelection,
+        inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
+      },
+      { nonBlocking: true },
+    );
   }
 
   if (isSessionRunningPhase(phase)) {
@@ -171,17 +180,23 @@ export async function dispatchPiSendText(
         await liveClient.clearQueue().catch(() => {});
         await liveClient.abort().catch(() => {});
       }
-      return host.startFreshTurn({
-        commandId: envelope.commandId,
-        clientId: envelope.clientId,
-        text: payload.text,
-        modelSelection: payload.modelSelection,
-        inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
-      });
+      return host.startFreshTurn(
+        {
+          commandId: envelope.commandId,
+          clientId: envelope.clientId,
+          text: payload.text,
+          attachments: payload.attachments,
+          conversationQuotes: payload.conversationQuotes,
+          modelSelection: payload.modelSelection,
+          inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
+        },
+        { nonBlocking: true },
+      );
     }
 
     if (delivery === "guide") {
       try {
+        await host.waitForInFlightPromptDispatch();
         const client = await host.ensureClient();
         await client.steer(payload.text);
         host.broadcastCommit(
@@ -216,6 +231,7 @@ export async function dispatchPiSendText(
     const queueItemId = `q_${randomUUID()}`;
     let enqueued = false;
     try {
+      await host.waitForInFlightPromptDispatch();
       const client = await host.ensureClient();
       host.broadcastCommit(
         projector.enqueueQueueMessage({
@@ -260,15 +276,20 @@ export async function dispatchPiSendText(
     await host.applyModeSwitch(payload.mode);
   }
 
-  return host.startFreshTurn({
-    commandId: envelope.commandId,
-    clientId: envelope.clientId,
-    text: payload.text,
-    attachments: payload.attachments,
-    conversationQuotes: payload.conversationQuotes,
-    modelSelection: payload.modelSelection,
-    inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
-  });
+  // 首页预热草稿与已有会话发起新回合均走 sendText：先同步落盘用户气泡并立刻返回 accepted ACK，
+  // 后台异步拉起 Pi 并投递 prompt，消除“侧栏已转圈但主页面停在首页空态 1-2s”的割裂感。
+  return host.startFreshTurn(
+    {
+      commandId: envelope.commandId,
+      clientId: envelope.clientId,
+      text: payload.text,
+      attachments: payload.attachments,
+      conversationQuotes: payload.conversationQuotes,
+      modelSelection: payload.modelSelection,
+      inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
+    },
+    { nonBlocking: true },
+  );
 }
 
 export async function dispatchPiAuxCommand(

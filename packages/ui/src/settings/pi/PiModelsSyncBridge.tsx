@@ -80,6 +80,8 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
     [providerView],
   );
   const [piCustomCount, setPiCustomCount] = useState(0);
+  const [piCustomModelCount, setPiCustomModelCount] = useState(0);
+  const [piCustomIds, setPiCustomIds] = useState<ReadonlySet<string>>(() => new Set());
   const [syncing, setSyncing] = useState(false);
 
   const loadPiCustomCount = useCallback(async () => {
@@ -87,6 +89,10 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
     try {
       const auth = await piService.listAuthAndProviders();
       setPiCustomCount(auth.customProviders.length);
+      setPiCustomModelCount(
+        auth.customProviders.reduce((sum, item) => sum + item.models.length, 0),
+      );
+      setPiCustomIds(new Set(auth.customProviders.map((item) => item.id)));
     } catch {
       // ignore transient error
     }
@@ -96,16 +102,17 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
     void loadPiCustomCount();
   }, [loadPiCustomCount]);
 
-  const customProvidersToSync = useMemo(
+  const unsyncedDraftProviders = useMemo(
     () =>
       formProviders.filter(
         (provider) =>
           provider.hasPersonalConfig &&
+          !piCustomIds.has(provider.providerId) &&
           !isLegacyZCodeProviderId(provider.providerId) &&
           provider.config.access?.type !== "zhipu-account" &&
           Boolean(provider.config.api?.baseUrl?.trim()),
       ),
-    [formProviders],
+    [formProviders, piCustomIds],
   );
   const currentThinking = (snapshot?.modelDefaults.thinkingLevel ?? "medium") as PiThinkingLevel;
   const hasLegacyDefaultProvider = isLegacyZCodeProviderId(snapshot?.modelDefaults.provider);
@@ -129,12 +136,12 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
     }
   }, [currentThinking, piService, tr, workspacePath]);
 
-  const syncAllToPiModelsJson = useCallback(async () => {
+  const syncOrReloadPiModelsJson = useCallback(async () => {
     if (!piService) return;
     setSyncing(true);
     try {
       let synced = 0;
-      for (const provider of customProvidersToSync) {
+      for (const provider of unsyncedDraftProviders) {
         const baseUrl = provider.config.api?.baseUrl?.trim() ?? "";
         if (!baseUrl) continue;
         const models: PiCustomModelEntry[] = provider.models
@@ -167,19 +174,24 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
         await piService.mutateAuthOrProvider({ op: "saveCustomProvider", input });
         synced += 1;
       }
-      await loadPiCustomCount();
+      await Promise.all([
+        loadPiCustomCount(),
+        providerSettingsService.refresh("pi-models-json-reload").catch(() => undefined),
+      ]);
       toast(
-        tr(
-          `已将 ${synced} 个自定义 Provider 同步至 ~/.pi/agent/models.json`,
-          `Synced ${synced} custom providers to ~/.pi/agent/models.json`,
-        ),
+        synced > 0
+          ? tr(
+              `已同步 ${synced} 个自定义 Provider 并重新加载 ~/.pi/agent/models.json`,
+              `Synced ${synced} providers and reloaded ~/.pi/agent/models.json`,
+            )
+          : tr("已重新加载 ~/.pi/agent/models.json", "Reloaded ~/.pi/agent/models.json"),
       );
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
     } finally {
       setSyncing(false);
     }
-  }, [customProvidersToSync, loadPiCustomCount, piService, tr]);
+  }, [loadPiCustomCount, piService, providerSettingsService, tr, unsyncedDraftProviders]);
 
   if (!piService) return null;
 
@@ -240,27 +252,35 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
         }
       />
       <PiRow
-        label={tr("同步至 ~/.pi/agent/models.json", "Sync to ~/.pi/agent/models.json")}
+        label={tr(
+          "Pi 自定义模型源 (~/.pi/agent/models.json)",
+          "Pi Custom Models (~/.pi/agent/models.json)",
+        )}
         hint={tr(
-          "将下方自定义 Provider、/models 批量导入模型与多档思考映射落盘至 Pi 原生配置。",
-          "Persist custom providers, batch-imported models, and thinkingLevelMap into Pi models.json.",
+          "下方供应商列表直接读取并实时写回 ~/.pi/agent/models.json，与终端 pi 共享全部自定义 API 与模型。",
+          "The provider list below directly reads and edits ~/.pi/agent/models.json shared with Pi CLI.",
         )}
         control={
           <div className="flex items-center gap-2">
             <PiStatusPill tone="success" testId="pi-models-synced-count">
               <CheckCircle2 className="size-3.5" />
-              {tr(`${piCustomCount} 个已写入`, `${piCustomCount} in models.json`)}
+              {tr(
+                `${piCustomCount} 个供应商 · ${piCustomModelCount} 个模型`,
+                `${piCustomCount} providers · ${piCustomModelCount} models`,
+              )}
             </PiStatusPill>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={syncing || customProvidersToSync.length === 0}
-              onClick={() => void syncAllToPiModelsJson()}
+              disabled={syncing}
+              onClick={() => void syncOrReloadPiModelsJson()}
               data-testid="pi-models-sync-btn"
             >
               <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-              {tr("立即同步", "Sync now")}
+              {unsyncedDraftProviders.length > 0
+                ? tr("同步并刷新", "Sync & Reload")
+                : tr("重新加载", "Reload")}
             </Button>
           </div>
         }

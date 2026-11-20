@@ -6,14 +6,8 @@ import {
   type ProviderSettingsFormProvider,
   type ProviderSettingsFormModel,
 } from "@/lib/providerSettingsFormTypes.js";
-import type {
-  FetchRemoteProviderModelsResult,
-  ModelConnectivityResult,
-} from "@zcode/shared";
-import type {
-  BatchAddPersonalModelInput,
-  FetchRemoteProviderModelsInput,
-} from "@zcode/services";
+import type { FetchRemoteProviderModelsResult, ModelConnectivityResult } from "@zcode/shared";
+import type { BatchAddPersonalModelInput, FetchRemoteProviderModelsInput } from "@zcode/services";
 import type { FetchRemoteModelImportItem } from "@/custom-appearance/index.js";
 import {
   isApiKeyAccess,
@@ -200,7 +194,7 @@ export function InlineEditableProviderCard({
   headerActionsVisible?: boolean;
   settingsRevision?: number;
 }) {
-  const { intl } = useZCodeIntl();
+  const { intl, locale } = useZCodeIntl();
   const { dismissFeedback, showFeedback } = useProviderDetailFeedback();
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(getProviderFormLabel(provider));
@@ -748,7 +742,9 @@ export function InlineEditableProviderCard({
     }
     const baseUrl = draftRef.current.baseUrlValue.trim();
     if (!baseUrl) {
-      throw new Error(intl.formatMessage({ id: "settings.modelProvider.fetchModelsMissingBaseUrl" }));
+      throw new Error(
+        intl.formatMessage({ id: "settings.modelProvider.fetchModelsMissingBaseUrl" }),
+      );
     }
     await commitPendingDraft("fetch-models").catch(() => undefined);
     return onFetchRemoteModels({
@@ -918,6 +914,13 @@ export function InlineEditableProviderCard({
           <ProviderApiKeySection
             apiKeyValue={apiKeyValue}
             apiKeyVisible={apiKeyVisible}
+            placeholder={
+              provider.executable && !apiKeyValue
+                ? locale.toLowerCase().startsWith("zh")
+                  ? "已保存在 ~/.pi/agent/models.json（留空保持不变，输入新密钥可覆盖）"
+                  : "Saved in ~/.pi/agent/models.json (leave blank to keep)"
+                : undefined
+            }
             presetApiKeyUrl={presetApiKeyUrl}
             onOpenPresetApiKey={onOpenPresetApiKey}
             onApiKeyChange={handleApiKeyValueChange}

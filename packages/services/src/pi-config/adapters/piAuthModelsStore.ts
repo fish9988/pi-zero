@@ -7,7 +7,6 @@
  * - 所有含密钥文件统一以 `0o600` 权限原子写入并写前留 `.bak`。
  */
 import path from "node:path";
-import type { ProviderSettingsView } from "@zcode/provider";
 import {
   PI_BUILTIN_PROVIDERS,
   type PiAuthAndProvidersSnapshot,
@@ -16,7 +15,6 @@ import {
   type PiProviderAuthStatus,
 } from "@zcode/shared/pi-config";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
-import type { IProviderSettingsService } from "#src/model-provider/providerFacadeServices.js";
 import type { PiModelInfo } from "#src/pi-runtime/contract.js";
 import {
   hasControlChars,
@@ -28,7 +26,6 @@ import {
 } from "../domain/piConfigHelpers.js";
 import {
   applyPiCustomProviderToText,
-  convertZCodeProviderViewToPiSaveInput,
   parsePiCustomProviders,
   removePiCustomProviderFromText,
   type EnvVarSource,
@@ -290,123 +287,4 @@ export async function removePiCustomProvider(
     logger.info(undefined, `Removed Pi custom provider=${providerId}`);
     return true;
   });
-}
-
-/**
- * 装饰 ZCode 原生 `IProviderSettingsService`：
- * 当用户在 ZCode 模型设置页（含批量 `/models` 导入与多档思考编辑器）保存或修改自定义 Provider/模型时，
- * 自动双向同步至 `<agentDir>/models.json` 并刷新 `PiModelCatalog`，保留 100% 原生体验且与终端 `pi` 共享！
- */
-export function createPiSyncedProviderSettingsService(input: {
-  base: IProviderSettingsService;
-  agentDir: string;
-  readProviderApiKey?:
-    | ((providerId: string, credentialKey?: string) => Promise<string | null>)
-    | undefined;
-  onSynced?: (() => void) | undefined;
-}): IProviderSettingsService {
-  const syncProviderFromView = async (
-    view: ProviderSettingsView,
-    providerId: string,
-  ): Promise<void> => {
-    const provider = view.providers.find((p) => p.providerId === providerId);
-    if (!provider || provider.effectiveConfig.group !== "standard-personal") return;
-    let keyWrite: PiCustomProviderSaveInput["key"] = { kind: "keep" };
-    const access = provider.effectiveConfig.access;
-    if (
-      access &&
-      (access.type === "api-key" || access.type === "zhipu-coding-plan-api-key") &&
-      typeof access.apiKey === "string" &&
-      access.apiKey.trim() !== ""
-    ) {
-      keyWrite = { kind: "literal", value: access.apiKey.trim() };
-    } else if (input.readProviderApiKey) {
-      const legacyAccess = access as { credentialKey?: unknown } | undefined;
-      const credentialKey =
-        typeof legacyAccess?.credentialKey === "string" && legacyAccess.credentialKey.trim()
-          ? legacyAccess.credentialKey.trim()
-          : undefined;
-      const secret = await input.readProviderApiKey(providerId, credentialKey).catch(() => null);
-      if (secret && secret.trim()) {
-        keyWrite = { kind: "literal", value: secret.trim() };
-      }
-    }
-    const payload = convertZCodeProviderViewToPiSaveInput(provider, keyWrite);
-    if (!payload) return;
-    try {
-      await savePiCustomProvider(input.agentDir, payload);
-      input.onSynced?.();
-    } catch (error) {
-      logger.warn(undefined, `Failed to sync ZCode provider=${providerId} to Pi models.json`, {
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
-
-  return {
-    onDidChange: input.base.onDidChange,
-    getView: () => input.base.getView(),
-    refresh: (reason) => input.base.refresh(reason),
-    async createPersonalProvider(arg) {
-      const created = await input.base.createPersonalProvider(arg);
-      await syncProviderFromView(created.view, created.providerId);
-      return created;
-    },
-    resolveModelConfig: (arg) => input.base.resolveModelConfig(arg),
-    fetchRemoteModels: (arg) => input.base.fetchRemoteModels(arg),
-    reorderPersonalProviders: (ids) => input.base.reorderPersonalProviders(ids),
-    testModelConnectivity: (arg) => input.base.testModelConnectivity(arg),
-
-    async savePersonalProviderOverlay(providerId, config, metadata) {
-      const view = await input.base.savePersonalProviderOverlay(providerId, config, metadata);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async deletePersonalProvider(providerId) {
-      const view = await input.base.deletePersonalProvider(providerId);
-      await removePiCustomProvider(input.agentDir, providerId).catch(() => undefined);
-      input.onSynced?.();
-      return view;
-    },
-    async reorderPersonalModels(providerId, modelIds) {
-      const view = await input.base.reorderPersonalModels(providerId, modelIds);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async addPersonalModel(providerId, modelId, config, useRecommendedConfig) {
-      const view = await input.base.addPersonalModel(
-        providerId,
-        modelId,
-        config,
-        useRecommendedConfig,
-      );
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async addPersonalModels(providerId, models) {
-      const view = await input.base.addPersonalModels(providerId, models);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async renamePersonalModel(providerId, currentModelId, nextModelId) {
-      const view = await input.base.renamePersonalModel(providerId, currentModelId, nextModelId);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async deletePersonalModel(providerId, modelId) {
-      const view = await input.base.deletePersonalModel(providerId, modelId);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-    async savePersonalModelDraft(draft) {
-      const view = await input.base.savePersonalModelDraft(draft);
-      await syncProviderFromView(view, draft.providerId);
-      return view;
-    },
-    async setPersonalModelEnabled(providerId, modelId, enabled) {
-      const view = await input.base.setPersonalModelEnabled(providerId, modelId, enabled);
-      await syncProviderFromView(view, providerId);
-      return view;
-    },
-  };
 }

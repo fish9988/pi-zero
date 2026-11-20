@@ -349,7 +349,9 @@ export class PiSessionController {
       broadcastCommit: (commit) => this.broadcastCommit(commit),
       applyLiveModelSwitch: (target) => this.applyLiveModelSwitch(target),
       applyModeSwitch: (mode) => this.applyModeSwitch(mode),
-      startFreshTurn: (input) => this.startFreshTurn(input),
+      startFreshTurn: (input, options) => this.startFreshTurn(input, options),
+      waitForInFlightPromptDispatch: () =>
+        this.inFlightPromptDispatch?.catch(() => undefined) ?? Promise.resolve(),
       handleEditUserQuery: (commandId, clientId, payload, inputOrigin) =>
         this.handleEditUserQuery(commandId, clientId, payload, inputOrigin),
       handleDeleteSession: (commandId) => this.handleDeleteSession(commandId),
@@ -483,7 +485,12 @@ export class PiSessionController {
     const dispatchToPi = async (): Promise<CommandAck> => {
       try {
         const initialClient = await this.ensureClient();
-        if (this.disposed || this.projector.getSnapshot().control.stopState === "stopping") {
+        const afterEnsureSnap = this.projector.getSnapshot();
+        if (
+          this.disposed ||
+          afterEnsureSnap.control.stopState === "stopping" ||
+          !isSessionRunningPhase(afterEnsureSnap.control.phase)
+        ) {
           return createCommandAck({
             commandId: input.commandId,
             status: "accepted",
@@ -492,6 +499,19 @@ export class PiSessionController {
           });
         }
         const activeClient = await this.syncModelConfigToClient(initialClient);
+        const afterSyncSnap = this.projector.getSnapshot();
+        if (
+          this.disposed ||
+          afterSyncSnap.control.stopState === "stopping" ||
+          !isSessionRunningPhase(afterSyncSnap.control.phase)
+        ) {
+          return createCommandAck({
+            commandId: input.commandId,
+            status: "accepted",
+            revisionAtDecision: this.projector.getRevision(),
+            result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
+          });
+        }
         const seqBefore = this.projector.getAgentLifecycleSeq();
         const ack = await activeClient.prompt(input.text);
         if (ack?.disposition === "handled") {

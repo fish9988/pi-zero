@@ -11,10 +11,7 @@ import type {
   ProviderSettingsFormProvider,
   ProviderSettingsFormModel,
 } from "@/lib/providerSettingsFormTypes.js";
-import type {
-  FetchRemoteProviderModelsResult,
-  ModelConnectivityResult,
-} from "@zcode/shared";
+import type { FetchRemoteProviderModelsResult, ModelConnectivityResult } from "@zcode/shared";
 import type { ProviderApiType } from "@zcode/provider";
 import {
   TID_MODEL_PROVIDER_ADD_MODEL_BUTTON,
@@ -300,6 +297,7 @@ export function ProviderApiKeySection({
   apiKeyValue,
   apiKeyVisible,
   readOnly,
+  placeholder,
   presetApiKeyUrl,
   onOpenPresetApiKey,
   onApiKeyChange,
@@ -312,6 +310,7 @@ export function ProviderApiKeySection({
   apiKeyValue: string;
   apiKeyVisible: boolean;
   readOnly?: boolean;
+  placeholder?: string;
   presetApiKeyUrl?: string;
   onOpenPresetApiKey?: () => void;
   onApiKeyChange: (value: string) => void;
@@ -337,6 +336,7 @@ export function ProviderApiKeySection({
         value={apiKeyValue}
         visible={apiKeyVisible}
         readOnly={readOnly}
+        placeholder={placeholder}
         onChange={onApiKeyChange}
         onBlur={onApiKeyBlur}
         onKeyDown={onApiKeyKeyDown}
@@ -415,10 +415,7 @@ export function ProviderModelsSection({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetchResult, setFetchResult] = useState<FetchRemoteProviderModelsResult | null>(null);
   const fetchGenerationRef = useRef(0);
-  const existingModelIds = useMemo(
-    () => new Set(models.map((model) => model.modelId)),
-    [models],
-  );
+  const existingModelIds = useMemo(() => new Set(models.map((model) => model.modelId)), [models]);
   const [addModel] = useState(createEmptyModel);
   const [addDraftErrorField, setAddDraftErrorField] = useState<
     | "id"

@@ -3,15 +3,13 @@ import { encodeCustomModelValue, decodeCustomModelValue } from "@/lib/zcodeCusto
 import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
 import { useServices } from "@/hooks/useServices.js";
 import { useSettings } from "@/hooks/useSettingService.js";
-import { isOfficialPlanProvider, type ModelSelection } from "@zcode/shared";
+import { type ModelSelection } from "@zcode/shared";
 import { clampReasoningLevel } from "@zcode/shared/model-config";
 import { thoughtLevelLabelId } from "@/chat-input-toolbar/thoughtLevelLabels.js";
 import {
   TID_SETTINGS_DEFAULT_MODEL_REASONING_TRIGGER,
   TID_SETTINGS_DEFAULT_MODEL_TRIGGER,
-  TID_SETTINGS_OFFICIAL_PLANS_SWITCH,
   TID_SETTINGS_PREFER_DEFAULT_MODEL_SWITCH,
-  TID_SETTINGS_SUBSCRIPTION_UI_SWITCH,
 } from "@zcode/shared/test-ids";
 import { Switch } from "@/components/ui/switch.js";
 import {
@@ -30,7 +28,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 const AUTO_MODEL_VALUE = "__auto__";
 
 /**
- * 模型设置分区顶部的四行规范设置项：默认模型、新对话优先、官方 Plan、订阅界面。
+ * 模型设置分区顶部的默认模型设置项（Pi Zero 已移除旧版 ZCode 智谱官方 Plan 与订阅入口开关）。
  * 每行都登记在 settingsSearchIndex 中，searchId 与翻译 id 相同。
  */
 export function DefaultModelAndOfficialPlanBar() {
@@ -40,13 +38,10 @@ export function DefaultModelAndOfficialPlanBar() {
   const modelSelectionRead = useModelSelectionServiceView(services.modelSelectionService);
   const [saving, setSaving] = useState(false);
 
-  const officialPlansEnabled = settings?.officialPlansEnabled !== false;
-  const subscriptionUiEnabled = settings?.subscriptionUiEnabled !== false;
   const preferDefaultModelForNewTasks = settings?.preferDefaultModelForNewTasks !== false;
   const configuredDefault = settings?.defaultModelSelection ?? null;
 
-  const view =
-    modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
+  const view = modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
   // 视图未就绪时也要有稳定引用：直接写 `?? []` 会每次渲染新建数组，
   // 让下面的 useMemo 每帧重算（lint: exhaustive-deps 不稳定依赖）。
   const providers = useMemo(() => view?.providers ?? [], [view]);
@@ -100,10 +95,7 @@ export function DefaultModelAndOfficialPlanBar() {
     const provider = providers.find((p) => p.providerId === decoded.providerId);
     const model = provider?.models.find((m) => m.modelId === decoded.modelName);
     const levels = model?.config.optionSpecs.reasoningLevel.values ?? [];
-    const reasoningLevel = clampReasoningLevel(
-      configuredDefault?.options?.reasoningLevel,
-      levels,
-    );
+    const reasoningLevel = clampReasoningLevel(configuredDefault?.options?.reasoningLevel, levels);
 
     const nextSelection: ModelSelection = {
       providerId: decoded.providerId,
@@ -115,10 +107,9 @@ export function DefaultModelAndOfficialPlanBar() {
       { defaultModelSelection: nextSelection },
       "settings.defaultModel.saveError",
     );
-    toast(
-      intl.formatMessage({ id: "settings.defaultModel.saved" }, { model: decoded.modelName }),
-      { variant: "success" },
-    );
+    toast(intl.formatMessage({ id: "settings.defaultModel.saved" }, { model: decoded.modelName }), {
+      variant: "success",
+    });
   };
 
   const handleReasoningChange = async (level: string) => {
@@ -132,46 +123,6 @@ export function DefaultModelAndOfficialPlanBar() {
         },
       },
       "settings.defaultModel.saveError",
-    );
-  };
-
-  const handleToggleOfficialPlans = async (nextEnabled: boolean) => {
-    const patch: Parameters<typeof update>[0] = {
-      officialPlansEnabled: nextEnabled,
-    };
-
-    if (!nextEnabled && configuredDefault) {
-      const configuredProvider = providers.find(
-        (p) => p.providerId === configuredDefault.providerId,
-      );
-      const pointsToOfficial = isOfficialPlanProvider({
-        providerId: configuredDefault.providerId,
-        group: configuredProvider?.config.group,
-        access: configuredProvider?.config.access,
-      });
-      if (pointsToOfficial) {
-        patch.defaultModelSelection = null;
-      }
-    }
-
-    await updateSettingsSafely(patch, "settings.officialPlans.saveError");
-    toast(
-      intl.formatMessage({
-        id: nextEnabled ? "settings.officialPlans.enabled" : "settings.officialPlans.disabled",
-      }),
-      { variant: "success" },
-    );
-  };
-
-  const handleToggleSubscriptionUi = async (nextEnabled: boolean) => {
-    await updateSettingsSafely({ subscriptionUiEnabled: nextEnabled }, "settings.subscriptionUi.saveError");
-    toast(
-      intl.formatMessage({
-        id: nextEnabled
-          ? "settings.subscriptionUi.enabled"
-          : "settings.subscriptionUi.disabled",
-      }),
-      { variant: "success" },
     );
   };
 
@@ -200,7 +151,9 @@ export function DefaultModelAndOfficialPlanBar() {
                 aria-label={defaultModelLabel}
                 data-testid={TID_SETTINGS_DEFAULT_MODEL_TRIGGER}
               >
-                <SelectValue placeholder={intl.formatMessage({ id: "settings.defaultModel.auto" })} />
+                <SelectValue
+                  placeholder={intl.formatMessage({ id: "settings.defaultModel.auto" })}
+                />
               </SelectTrigger>
               <SelectContent className="max-h-80" position="popper" align="end" sideOffset={4}>
                 <SelectItem value={AUTO_MODEL_VALUE}>
@@ -296,40 +249,6 @@ export function DefaultModelAndOfficialPlanBar() {
           }
         />
       ) : null}
-
-      <SettingsRow
-        searchId="settings.officialPlans"
-        label={intl.formatMessage({ id: "settings.officialPlans" })}
-        description={intl.formatMessage({ id: "settings.officialPlansDescription" })}
-        control={
-          <Switch
-            checked={officialPlansEnabled}
-            onCheckedChange={(checked) => {
-              void handleToggleOfficialPlans(checked);
-            }}
-            disabled={saving}
-            aria-label={intl.formatMessage({ id: "settings.officialPlans" })}
-            data-testid={TID_SETTINGS_OFFICIAL_PLANS_SWITCH}
-          />
-        }
-      />
-
-      <SettingsRow
-        searchId="settings.subscriptionUi"
-        label={intl.formatMessage({ id: "settings.subscriptionUi" })}
-        description={intl.formatMessage({ id: "settings.subscriptionUiDescription" })}
-        control={
-          <Switch
-            checked={subscriptionUiEnabled}
-            onCheckedChange={(checked) => {
-              void handleToggleSubscriptionUi(checked);
-            }}
-            disabled={saving}
-            aria-label={intl.formatMessage({ id: "settings.subscriptionUi" })}
-            data-testid={TID_SETTINGS_SUBSCRIPTION_UI_SWITCH}
-          />
-        }
-      />
     </SettingsGroupCard>
   );
 }

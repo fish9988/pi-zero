@@ -402,6 +402,59 @@ export function PiCredentialsSection() {
         </PiCard>
       </div>
 
+      {/* Pi 自定义 API Provider（~/.pi/agent/models.json） */}
+      {(snapshot?.customProviders ?? []).length > 0 ? (
+        <div className="space-y-3" data-testid="pi-custom-providers-overview">
+          <PiSectionHeader
+            title={tr(
+              "自定义 API Provider (~/.pi/agent/models.json)",
+              "Custom API Providers (~/.pi/agent/models.json)",
+            )}
+            count={snapshot?.customProviders.length ?? 0}
+          />
+          <PiCard>
+            {(snapshot?.customProviders ?? []).map((custom) => {
+              const keyLabel =
+                custom.key.kind === "literal"
+                  ? tr("API Key 已配置", "API Key configured")
+                  : custom.key.kind === "command"
+                    ? "Command (!)"
+                    : custom.key.kind === "env"
+                      ? `$${custom.key.name}`
+                      : tr("未配置 Key", "No API Key");
+              const keyTone =
+                custom.key.kind === "literal" ||
+                custom.key.kind === "command" ||
+                (custom.key.kind === "env" && custom.key.source !== "missing")
+                  ? "success"
+                  : "neutral";
+              return (
+                <PiRow
+                  key={custom.id}
+                  testId={`pi-custom-provider-summary-${custom.id}`}
+                  label={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{custom.id}</span>
+                      {custom.api ? (
+                        <span className="font-mono text-ui-xs text-foreground-subtlest">
+                          {custom.api}
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                  hint={
+                    custom.baseUrl
+                      ? `${custom.baseUrl} · ${tr(`${custom.models.length} 个模型`, `${custom.models.length} models`)}`
+                      : tr(`${custom.models.length} 个模型`, `${custom.models.length} models`)
+                  }
+                  control={<PiStatusPill tone={keyTone}>{keyLabel}</PiStatusPill>}
+                />
+              );
+            })}
+          </PiCard>
+        </div>
+      ) : null}
+
       {/* .env 环境变量（只写） */}
       <div className="space-y-3">
         <PiSectionHeader

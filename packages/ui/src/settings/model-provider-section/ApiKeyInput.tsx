@@ -9,6 +9,7 @@ export function ApiKeyInput({
   value,
   visible,
   readOnly,
+  placeholder,
   onChange,
   onBlur,
   onKeyDown,
@@ -19,6 +20,7 @@ export function ApiKeyInput({
   value: string;
   visible: boolean;
   readOnly?: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
   onBlur: () => void;
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -36,9 +38,12 @@ export function ApiKeyInput({
         size="lg"
         data-testid={TID_MODEL_PROVIDER_API_KEY_INPUT}
         className="pr-10 h-9"
-        placeholder={intl.formatMessage({
-          id: "settings.modelProvider.apiKeyPlaceholder",
-        })}
+        placeholder={
+          placeholder ??
+          intl.formatMessage({
+            id: "settings.modelProvider.apiKeyPlaceholder",
+          })
+        }
         value={value}
         readOnly={readOnly}
         disabled={readOnly}
