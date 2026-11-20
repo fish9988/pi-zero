@@ -19,6 +19,7 @@ import type {
   PiExtensionUiResponsePayload,
   PiRpcEvent,
 } from "#src/pi-runtime/domain/piRpcTypes.js";
+import type { PiModelCostRates } from "#src/pi-runtime/domain/piContextUsageMetrics.js";
 import {
   drainPendingExtensionUiState,
   resolvePendingExtensionUiState,
@@ -146,6 +147,7 @@ export class PiEventProjector {
       admissionCounter: 0,
       agentLifecycleSeq: 0,
       contextWindowMax: input.hydrated?.contextWindowMax ?? input.contextWindowMax ?? 0,
+      modelCost: undefined,
       lastAssistantPreview: input.hydrated?.lastAssistantPreview,
       activeTurnId: null,
       activeTurnHeaderRowId: null,
@@ -173,6 +175,7 @@ export class PiEventProjector {
       subagentSessionsByChildId: new Map(),
       dirtySubagentChildIds: new Set(),
       getRowById: (rowId) => this.getRowById(rowId),
+      getAllRows: () => this.allRows,
     };
   }
 
@@ -208,6 +211,10 @@ export class PiEventProjector {
     if (typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0) {
       this.state.contextWindowMax = Math.floor(maxTokens);
     }
+  }
+
+  setModelCost(cost: PiModelCostRates | undefined): void {
+    if (cost) this.state.modelCost = cost;
   }
 
   getRowsRange(

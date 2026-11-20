@@ -7,7 +7,9 @@
  * - `createPiAugmentedModelSelectionService` 将 Pi 模型合入现有 `ModelSelectionView`，
  *   100% 保留用户已配置的个人/第三方 Provider 与模型设置，绝不返回明文凭据。
  */
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import path from "node:path";
 import { Emitter, type Event, type IDisposable } from "@zcode/rpc";
 import type { ModelSelectionView, ModelSelectionViewInput } from "@zcode/provider";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
@@ -17,8 +19,76 @@ import {
   mergePiModelsIntoSelectionView,
   type PiModelCatalogSnapshot,
 } from "#src/pi-runtime/domain/piModelCapability.js";
-import { discoverPi, formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
+import {
+  discoverPi,
+  formatRedactedPiError,
+  resolvePiAgentDir,
+} from "#src/pi-runtime/adapters/piDiscover.js";
 import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
+
+type ModelCostRates = NonNullable<PiModelInfo["cost"]>;
+
+function readNonNegativeNum(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function hasPositiveCost(cost: PiModelInfo["cost"]): boolean {
+  return Boolean(
+    cost && (cost.input > 0 || cost.output > 0 || cost.cacheRead > 0 || cost.cacheWrite > 0),
+  );
+}
+
+/** 从 `<agentDir>/models.json` 读取自定义模型定价表（`provider/id` -> `cost`），不读任何密钥。 */
+async function readModelsJsonCostMap(
+  env?: NodeJS.ProcessEnv | undefined,
+): Promise<Map<string, ModelCostRates>> {
+  const map = new Map<string, ModelCostRates>();
+  try {
+    const filePath = path.join(resolvePiAgentDir(env), "models.json");
+    const raw = await readFile(filePath, "utf8");
+    const parsed: unknown = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    if (!parsed || typeof parsed !== "object") return map;
+    const providers = (parsed as Record<string, unknown>)["providers"];
+    if (!providers || typeof providers !== "object") return map;
+    for (const [providerId, rawProvider] of Object.entries(providers as Record<string, unknown>)) {
+      if (!rawProvider || typeof rawProvider !== "object") continue;
+      const models = (rawProvider as Record<string, unknown>)["models"];
+      if (!Array.isArray(models)) continue;
+      for (const item of models) {
+        if (!item || typeof item !== "object") continue;
+        const rec = item as Record<string, unknown>;
+        const id = typeof rec["id"] === "string" ? rec["id"].trim() : "";
+        const rawCost = rec["cost"];
+        if (!id || !rawCost || typeof rawCost !== "object") continue;
+        const c = rawCost as Record<string, unknown>;
+        const cost: ModelCostRates = {
+          input: readNonNegativeNum(c["input"]),
+          output: readNonNegativeNum(c["output"]),
+          cacheRead: readNonNegativeNum(c["cacheRead"]),
+          cacheWrite: readNonNegativeNum(c["cacheWrite"]),
+        };
+        if (hasPositiveCost(cost)) {
+          map.set(`${providerId}/${id}`, cost);
+        }
+      }
+    }
+  } catch {
+    // models.json 不存在或非 JSON 时静默忽略
+  }
+  return map;
+}
+
+function enrichModelsWithCostMap(
+  models: readonly PiModelInfo[],
+  costMap: ReadonlyMap<string, ModelCostRates>,
+): PiModelInfo[] {
+  if (costMap.size === 0) return [...models];
+  return models.map((model) => {
+    if (hasPositiveCost(model.cost)) return model;
+    const fallback = costMap.get(`${model.provider}/${model.id}`);
+    return fallback ? { ...model, cost: fallback } : model;
+  });
+}
 
 const logger = createServiceLogger("pi-model-catalog");
 const DEFAULT_CATALOG_TTL_MS = 60_000;
@@ -121,15 +191,23 @@ export class PiModelCatalog {
         defaultTimeoutMs: CATALOG_PROBE_TIMEOUT_MS,
       });
       if (this.disposed) return this.snapshot;
-      const [state, modelsResult] = await Promise.all([
+      const [state, modelsResult, costMap] = await Promise.all([
         client.getState(),
         client.getAvailableModels(),
+        readModelsJsonCostMap(this.options.env),
       ]);
       if (this.disposed) return this.snapshot;
-      const models = Array.isArray(modelsResult?.models) ? modelsResult.models : [];
+      const rawModels = Array.isArray(modelsResult?.models) ? modelsResult.models : [];
+      const models = enrichModelsWithCostMap(rawModels, costMap);
+      const rawDefault = state.model ?? models[0];
+      const defaultModel =
+        rawDefault && !hasPositiveCost(rawDefault.cost)
+          ? (models.find((m) => m.provider === rawDefault.provider && m.id === rawDefault.id) ??
+            rawDefault)
+          : rawDefault;
       this.updateSnapshot({
         models,
-        defaultModel: state.model ?? models[0],
+        defaultModel,
         defaultThinkingLevel: state.thinkingLevel,
         available: true,
       });

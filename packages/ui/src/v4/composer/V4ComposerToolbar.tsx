@@ -1157,8 +1157,10 @@ function V4ComposerModelControlsImpl({
       size: contextWindow.maxTokens,
       ...(contextWindow.cache ? { cache: contextWindow.cache } : {}),
       ...(contextWindow.breakdown ? { breakdown: contextWindow.breakdown } : {}),
+      ...(usage?.cumulative ? { cumulative: usage.cumulative } : {}),
+      ...(usage?.cost ? { cost: usage.cost } : {}),
     };
-  }, [usage?.contextWindow]);
+  }, [usage?.contextWindow, usage?.cost, usage?.cumulative]);
   // 工具条热键已转正为命令表命令：tooltip 快捷键文案读生效表，
   // 改绑后按钮提示即时跟随（不能用硬编码文案）。
   const modelShortcutLabel = useShortcutCommandLabel("openModelMenu");

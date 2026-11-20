@@ -2813,7 +2813,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                     <section
                       data-workspace-conversation-frame="true"
                       className={cn(
-                        "relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background",
+                        "relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background [contain:layout_style]",
                         isSidePaneVisible
                           ? "rounded-[var(--workspace-panel-radius)] border border-border"
                           : resolveWorkspaceShellWindowChromeClass({

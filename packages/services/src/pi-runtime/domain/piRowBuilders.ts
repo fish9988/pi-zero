@@ -15,6 +15,7 @@ import type {
   TurnHeaderRow,
   TurnWorkSegment,
   UserInputRow,
+  WireConversationRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import type {
   PiAssistantMessage,
@@ -22,6 +23,12 @@ import type {
   PiUsage,
   PiUserMessage,
 } from "#src/pi-runtime/domain/piRpcTypes.js";
+import {
+  accumulatePiSessionCost,
+  computePiCacheUsage,
+  computePiContextBreakdown,
+  type PiModelCostRates,
+} from "#src/pi-runtime/domain/piContextUsageMetrics.js";
 import {
   computeInputRouting,
   computeSessionAvailability,
@@ -360,20 +367,43 @@ export function accumulateSessionUsage(
   current: ConversationSnapshot["usage"],
   usage: PiUsage,
   contextWindowMax: number,
+  options?: {
+    readonly rows?: readonly WireConversationRow[] | undefined;
+    readonly modelPricing?: PiModelCostRates | null | undefined;
+  },
 ): { nextUsage: ConversationSnapshot["usage"]; addedOutputTokens: number } {
   const addedInput = Math.max(0, usage.input || 0);
   const addedOutput = Math.max(0, usage.output || 0);
   const addedCacheRead = Math.max(0, usage.cacheRead || 0);
   const addedCacheWrite = Math.max(0, usage.cacheWrite || 0);
   const usedTokens = addedInput + addedCacheRead + addedCacheWrite + addedOutput;
+  const cache = computePiCacheUsage(
+    current.contextWindow?.cache,
+    addedInput,
+    addedCacheRead,
+    addedCacheWrite,
+  );
+  const breakdown =
+    usedTokens > 0 && options?.rows
+      ? computePiContextBreakdown(options.rows, usedTokens)
+      : current.contextWindow?.breakdown;
   const contextWindow =
     contextWindowMax > 0 && usedTokens > 0
       ? {
           usedTokens,
           maxTokens: contextWindowMax,
           autoCompactThresholdTokens: null,
+          ...(cache ? { cache } : {}),
+          ...(breakdown ? { breakdown } : {}),
         }
-      : current.contextWindow;
+      : current.contextWindow
+        ? {
+            ...current.contextWindow,
+            ...(cache ? { cache } : {}),
+            ...(breakdown ? { breakdown } : {}),
+          }
+        : null;
+  const cost = accumulatePiSessionCost(current.cost, usage, options?.modelPricing);
   return {
     addedOutputTokens: addedOutput,
     nextUsage: {
@@ -384,6 +414,7 @@ export function accumulateSessionUsage(
         cacheReadTokens: current.cumulative.cacheReadTokens + addedCacheRead,
         cacheWriteTokens: current.cumulative.cacheWriteTokens + addedCacheWrite,
       },
+      cost,
     },
   };
 }

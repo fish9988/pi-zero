@@ -41,6 +41,10 @@ import {
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import {
+  PiDeltaCoalescer,
+  shouldNotifySessionIndexForCommit,
+} from "#src/pi-runtime/adapters/piDeltaCoalescer.js";
+import {
   applyPiExtensionUiEvent,
   clearPiSessionExtensionUiState,
 } from "#src/pi-runtime/adapters/piExtensionUiStateStore.js";
@@ -55,6 +59,7 @@ import {
   hydratePiClientInitialState,
   normalizePiExecutionMode,
   resolveInitialControllerConfig,
+  resolveModelCostFromCatalog,
   resolveRequestedSelectionSwitch,
   spawnConfiguredPiClient,
   syncPiModelAndThoughtToClient,
@@ -93,6 +98,7 @@ export class PiSessionController {
   private readonly managedRuntimeDir: string | undefined;
   private readonly callbacks: PiSessionControllerCallbacks;
   private readonly subscriptions = new Map<string, TopicSubscriptionState>();
+  private readonly deltaCoalescer: PiDeltaCoalescer;
   private client: PiRpcClient | null = null;
   private clientEventUnsub: (() => void) | null = null;
   private clientExitUnsub: (() => void) | null = null;
@@ -124,7 +130,7 @@ export class PiSessionController {
     this.managedRuntimeDir = options.managedRuntimeDir;
     this.callbacks = options.callbacks;
 
-    const { config, contextWindowMax } = resolveInitialControllerConfig({
+    const { config, contextWindowMax, modelCost } = resolveInitialControllerConfig({
       catalog: this.catalog,
       modelSelection: options.modelSelection,
       thoughtLevel: options.thoughtLevel,
@@ -141,41 +147,28 @@ export class PiSessionController {
       hydrated: options.hydratedFromDisk?.hydrated,
       readOnlyArchive: options.readOnlyArchive,
     });
+    this.projector.setModelCost(modelCost);
+    this.deltaCoalescer = new PiDeltaCoalescer((batch) => this.emitCommittedBatch(batch));
   }
 
-  isPublishedToIndex(): boolean {
-    return this.publishedToIndex;
-  }
-  getRevision(): number {
-    return this.projector.getRevision();
-  }
-  getSessionFilePath(): string | undefined {
-    return this.piSessionFile;
-  }
-  getLiveClient(): PiRpcClient | null {
-    return this.client?.alive ? this.client : null;
-  }
-  findTurnForCommand(commandId: string) {
-    return this.projector.findTurnForCommand(commandId);
-  }
-  getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
-    return this.projector.getTurnFileChanges(target);
-  }
-  getSubagentDirectorySnapshot() {
-    return this.projector.getSubagentDirectorySnapshot();
-  }
+  isPublishedToIndex = () => this.publishedToIndex;
+  getRevision = () => this.projector.getRevision();
+  getSessionFilePath = () => this.piSessionFile;
+  getLiveClient = () => (this.client?.alive ? this.client : null);
+  findTurnForCommand = (commandId: string) => this.projector.findTurnForCommand(commandId);
+  getTurnFileChanges = (target: { rowId: number; entityId: string }) =>
+    this.projector.getTurnFileChanges(target);
+  getSubagentDirectorySnapshot = () => this.projector.getSubagentDirectorySnapshot();
+  unsubscribe = (subscriptionId: string) => {
+    this.subscriptions.delete(subscriptionId);
+  };
   updateVirtualSubagentSnapshot(
     snapshot: import("@zcode/shared/zcode-protocol-v4").ConversationSnapshot,
     rows: readonly import("@zcode/shared/zcode-protocol-v4").WireConversationRow[],
   ): void {
     this.lastActivityAt = Date.now();
     this.projector.replaceWithVirtualSnapshot(snapshot, rows);
-    for (const sub of this.subscriptions.values()) {
-      this.emitSnapshotToSubscription(sub, "recovery");
-    }
-  }
-  unsubscribe(subscriptionId: string): void {
-    this.subscriptions.delete(subscriptionId);
+    for (const sub of this.subscriptions.values()) this.emitSnapshotToSubscription(sub, "recovery");
   }
   async ensureReady(): Promise<void> {
     if (this.disposed || this.readOnly) return;
@@ -326,6 +319,7 @@ export class PiSessionController {
   async disposeAndWait(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.deltaCoalescer.dispose();
     const drained = this.projector.drainPendingExtensionUiInteractions();
     if (this.client?.alive) {
       for (const id of drained.cancelledIds) {
@@ -482,51 +476,36 @@ export class PiSessionController {
       }),
     );
 
+    const makeStartAck = () =>
+      createCommandAck({
+        commandId: input.commandId,
+        status: "accepted",
+        revisionAtDecision: this.projector.getRevision(),
+        result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
+      });
+    const isTurnInterrupted = () => {
+      const snap = this.projector.getSnapshot();
+      return (
+        this.disposed ||
+        snap.control.stopState === "stopping" ||
+        !isSessionRunningPhase(snap.control.phase)
+      );
+    };
+
     const dispatchToPi = async (): Promise<CommandAck> => {
       try {
         const initialClient = await this.ensureClient();
-        const afterEnsureSnap = this.projector.getSnapshot();
-        if (
-          this.disposed ||
-          afterEnsureSnap.control.stopState === "stopping" ||
-          !isSessionRunningPhase(afterEnsureSnap.control.phase)
-        ) {
-          return createCommandAck({
-            commandId: input.commandId,
-            status: "accepted",
-            revisionAtDecision: this.projector.getRevision(),
-            result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
-          });
-        }
+        if (isTurnInterrupted()) return makeStartAck();
         const activeClient = await this.syncModelConfigToClient(initialClient);
-        const afterSyncSnap = this.projector.getSnapshot();
-        if (
-          this.disposed ||
-          afterSyncSnap.control.stopState === "stopping" ||
-          !isSessionRunningPhase(afterSyncSnap.control.phase)
-        ) {
-          return createCommandAck({
-            commandId: input.commandId,
-            status: "accepted",
-            revisionAtDecision: this.projector.getRevision(),
-            result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
-          });
-        }
+        if (isTurnInterrupted()) return makeStartAck();
         const seqBefore = this.projector.getAgentLifecycleSeq();
         const ack = await activeClient.prompt(input.text);
-        if (ack?.disposition === "handled") {
-          this.broadcastCommit(this.projector.completeHandledPrompt(Date.now()));
-        } else {
-          this.broadcastCommit(
-            this.projector.applyOptimisticRunningIfUnchanged(seqBefore, Date.now()),
-          );
-        }
-        return createCommandAck({
-          commandId: input.commandId,
-          status: "accepted",
-          revisionAtDecision: this.projector.getRevision(),
-          result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
-        });
+        this.broadcastCommit(
+          ack?.disposition === "handled"
+            ? this.projector.completeHandledPrompt(Date.now())
+            : this.projector.applyOptimisticRunningIfUnchanged(seqBefore, Date.now()),
+        );
+        return makeStartAck();
       } catch (error) {
         const redacted = formatRedactedPiError(error);
         logger.warn(undefined, `Pi prompt 执行失败 session=${this.sessionId}: ${redacted}`);
@@ -550,12 +529,7 @@ export class PiSessionController {
           if (this.inFlightPromptDispatch === pending) this.inFlightPromptDispatch = null;
         });
       this.inFlightPromptDispatch = pending;
-      return createCommandAck({
-        commandId: input.commandId,
-        status: "accepted",
-        revisionAtDecision: this.projector.getRevision(),
-        result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
-      });
+      return makeStartAck();
     }
 
     return dispatchToPi();
@@ -634,7 +608,10 @@ export class PiSessionController {
         this.projector.getSnapshot().config,
       );
       if (hydrated.sessionFile) this.piSessionFile = hydrated.sessionFile;
-      if (hydrated.model) this.activeClientModel = hydrated.model;
+      if (hydrated.model) {
+        this.activeClientModel = hydrated.model;
+        this.projector.setModelCost(resolveModelCostFromCatalog(this.catalog, hydrated.model));
+      }
       if (hydrated.modelKey) this.activeClientModelKey = hydrated.modelKey;
       this.activeClientThinking = hydrated.thinkingLevel;
       this.projector.setContextWindowMax(hydrated.contextWindow);
@@ -654,6 +631,9 @@ export class PiSessionController {
     );
     if (!resolved) return;
     this.projector.setContextWindowMax(resolved.contextWindow);
+    this.projector.setModelCost(
+      resolveModelCostFromCatalog(this.catalog, undefined, resolved.provider, resolved.model),
+    );
     this.broadcastCommit(
       this.projector.applyModelSwitch({
         provider: resolved.provider,
@@ -700,6 +680,9 @@ export class PiSessionController {
     this.activeClientModelKey = outcome.modelKey;
     this.activeClientThinking = outcome.thinkingLevel;
     this.projector.setContextWindowMax(outcome.contextWindow);
+    this.projector.setModelCost(
+      resolveModelCostFromCatalog(this.catalog, outcome.model, target.provider, target.model),
+    );
     return {
       client: outcome.client,
       thought: outcome.thinkingLevel,
@@ -780,6 +763,7 @@ export class PiSessionController {
     sub: TopicSubscriptionState,
     deliveryKind: "initial" | "recovery",
   ): void {
+    this.deltaCoalescer.flushNow();
     emitConversationSnapshotFrames(sub, this.projector.getSnapshot(), deliveryKind, (wire) =>
       this.callbacks.emitConversationFrame(wire),
     );
@@ -787,11 +771,16 @@ export class PiSessionController {
 
   private broadcastCommit(commit: ProjectionCommit | null): void {
     if (!commit || commit.deltas.length === 0 || this.disposed) return;
+    this.deltaCoalescer.enqueue(commit);
+  }
+
+  private emitCommittedBatch(commit: ProjectionCommit): void {
+    if (this.disposed) return;
     this.lastActivityAt = Date.now();
     emitConversationDeltaFrames(this.subscriptions.values(), commit, this.lastActivityAt, (wire) =>
       this.callbacks.emitConversationFrame(wire),
     );
-    if (this.publishedToIndex) {
+    if (this.publishedToIndex && shouldNotifySessionIndexForCommit(commit)) {
       this.callbacks.onSessionPublishedOrUpdated(this.getSummary());
     }
   }

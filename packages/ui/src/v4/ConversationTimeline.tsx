@@ -1224,7 +1224,10 @@ function ConversationTimelineImpl({
           userScrollIntent: getActiveUserScrollIntent(),
         }),
       );
-      if (followingRef.current) {
+      const isSidePaneResizing =
+        typeof document !== "undefined" &&
+        document.documentElement.dataset.sidePaneResizing === "true";
+      if (followingRef.current && !isSidePaneResizing) {
         if (contentWidthResizeSettleTimerRef.current !== null) {
           window.clearTimeout(contentWidthResizeSettleTimerRef.current);
           contentWidthResizeSettleTimerRef.current = null;
@@ -1285,8 +1288,12 @@ function ConversationTimelineImpl({
       if (nextWidth === stableContentWidthRef.current) return;
 
       // 宽度变化会让虚拟行分批重新测高；逐行补偿或逐批追底都会
-      // 连续改写 scrollTop。resize 期间暂停两者，稳定后只执行一次最终贴底。
+      // 连续改写 scrollTop。侧栏开合/拖拽期间跳过逐帧 flushSync，稳定后统一批量测高并贴底，
+      // 消除开合/拖拽时的同步布局卡顿。
       contentWidthResizeActiveRef.current = true;
+      if (followingRef.current && getActiveUserScrollIntent() !== "awayFromBottom") {
+        scrollToBottom();
+      }
       if (contentWidthResizeSettleTimerRef.current !== null) {
         window.clearTimeout(contentWidthResizeSettleTimerRef.current);
       }
@@ -1294,6 +1301,18 @@ function ConversationTimelineImpl({
         stableContentWidthRef.current = contentColumn.clientWidth;
         contentWidthResizeActiveRef.current = false;
         contentWidthResizeSettleTimerRef.current = null;
+        const measurements = Array.from(
+          contentColumn.querySelectorAll(":scope > [data-index]"),
+          (node) => ({
+            index: Number(node.getAttribute("data-index")),
+            height: measureElement(node, undefined),
+          }),
+        );
+        for (const item of measurements) {
+          if (Number.isFinite(item.index) && Number.isFinite(item.height)) {
+            virtualizer.resizeItem(item.index, item.height);
+          }
+        }
         // 宽度校正期间禁用测高补偿；发布既有生命周期的结束，使待定位搜索此时接管。
         // 否则过早居中后，新挂载的上方缓冲行会把命中推离视口。
         commitMeasuredLayout((revision) => revision + 1);

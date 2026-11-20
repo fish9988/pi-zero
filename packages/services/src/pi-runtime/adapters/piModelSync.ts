@@ -342,13 +342,31 @@ export async function spawnConfiguredPiClient(input: {
   return { client, sessionFile };
 }
 
+export function resolveModelCostFromCatalog(
+  catalog: PiModelCatalog,
+  model: PiModelInfo | undefined,
+  provider?: string,
+  modelId?: string,
+): PiModelInfo["cost"] {
+  if (model?.cost) return model.cost;
+  const p = model?.provider ?? provider;
+  const id = model?.id ?? modelId;
+  return p && id
+    ? catalog.getSnapshot().models.find((m) => m.provider === p && m.id === id)?.cost
+    : undefined;
+}
+
 /** 构造新建会话控制器的初始模型配置与上下文上限（从目录快照与可选请求选择合成）。 */
 export function resolveInitialControllerConfig(input: {
   catalog: PiModelCatalog;
   modelSelection?: ModelSelection | undefined;
   thoughtLevel?: string | undefined;
   mode?: string | undefined;
-}): { readonly config: SessionConfigState; readonly contextWindowMax: number | undefined } {
+}): {
+  readonly config: SessionConfigState;
+  readonly contextWindowMax: number | undefined;
+  readonly modelCost: PiModelInfo["cost"];
+} {
   const snap = input.catalog.getSnapshot();
   const effectiveSelection: ModelSelection | undefined = input.modelSelection
     ? {
@@ -366,7 +384,7 @@ export function resolveInitialControllerConfig(input: {
   const matched = snap.models.find(
     (model) => model.provider === config.provider && model.id === config.model,
   );
-  return { config, contextWindowMax: matched?.contextWindow };
+  return { config, contextWindowMax: matched?.contextWindow, modelCost: matched?.cost };
 }
 
 /** 取消活跃客户端上的待处理扩展交互，并优雅清空队列/中止当前回合。 */

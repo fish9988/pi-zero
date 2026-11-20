@@ -133,6 +133,7 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
   let effectiveModel = "";
   let effectiveThought = input.defaultThinkingLevel ?? "";
   let contextWindowMax = input.defaultModel?.contextWindow ?? 0;
+  let activeModelCost: PiModelInfo["cost"] = input.defaultModel?.cost;
   let usage: ConversationSnapshot["usage"] = {
     contextWindow: null,
     cumulative: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -143,6 +144,9 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
     const matched = catalogModels.find((m) => m.provider === provider && m.id === modelId);
     if (matched?.contextWindow && matched.contextWindow > 0) {
       contextWindowMax = matched.contextWindow;
+    }
+    if (matched?.cost) {
+      activeModelCost = matched.cost;
     }
   };
 
@@ -517,7 +521,10 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
 
     const msgUsage = readPiUsageRecord(msg["usage"]);
     if (msgUsage) {
-      const updated = accumulateSessionUsage(usage, msgUsage, contextWindowMax);
+      const updated = accumulateSessionUsage(usage, msgUsage, contextWindowMax, {
+        rows,
+        modelPricing: activeModelCost,
+      });
       usage = updated.nextUsage;
       activeTurnOutputTokens += updated.addedOutputTokens;
     }

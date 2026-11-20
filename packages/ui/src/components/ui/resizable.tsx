@@ -82,9 +82,26 @@ type ResizablePanelProps = PanelProps;
 /*  ResizableHandle                                                    */
 /* ------------------------------------------------------------------ */
 
-function ResizableHandle({ className, ...props }: SeparatorProps) {
+function ResizableHandle({ className, onPointerDown, ...props }: SeparatorProps) {
+  const handlePointerDown: SeparatorProps["onPointerDown"] = (event) => {
+    onPointerDown?.(event);
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const root = document.documentElement;
+    root.dataset.sidePaneResizing = "true";
+    const clear = () => {
+      delete root.dataset.sidePaneResizing;
+      window.removeEventListener("pointerup", clear, true);
+      window.removeEventListener("pointercancel", clear, true);
+      window.removeEventListener("blur", clear);
+    };
+    window.addEventListener("pointerup", clear, true);
+    window.addEventListener("pointercancel", clear, true);
+    window.addEventListener("blur", clear);
+  };
+
   return (
     <Separator
+      onPointerDown={handlePointerDown}
       // react-resizable-panels 的 Separator 不会暴露 data-orientation，
       // 实际输出的是 aria-orientation，而且方向和 PanelGroup 相反。
       // 之前写的 data-[orientation=...] 一直没有命中，所以 w-px / h-px 看起来“没生效”。

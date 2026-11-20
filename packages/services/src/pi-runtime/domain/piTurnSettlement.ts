@@ -17,6 +17,7 @@ import type {
 import { createHydratedConversationSnapshot } from "#src/pi-runtime/domain/piArchiveSnapshotFactory.js";
 import type { StructuredDiffHunk } from "#src/pi-runtime/domain/piEditDiffMapper.js";
 import type { PiPendingExtensionUiMeta } from "#src/pi-runtime/domain/piExtensionUiBridge.js";
+import type { PiModelCostRates } from "#src/pi-runtime/domain/piContextUsageMetrics.js";
 import type { VirtualSubagentSessionPayload } from "#src/pi-runtime/domain/piSubagentProjector.js";
 import { pauseQueueWithReason } from "#src/pi-runtime/domain/piQueueProjector.js";
 import {
@@ -61,6 +62,7 @@ export interface PiProjectorRuntimeState {
   admissionCounter: number;
   agentLifecycleSeq: number;
   contextWindowMax: number;
+  modelCost: PiModelCostRates | undefined;
   lastAssistantPreview: string | undefined;
   activeTurnId: string | null;
   activeTurnHeaderRowId: number | null;
@@ -88,6 +90,7 @@ export interface PiProjectorRuntimeState {
   readonly subagentSessionsByChildId: Map<string, VirtualSubagentSessionPayload>;
   readonly dirtySubagentChildIds: Set<string>;
   getRowById(rowId: number): WireConversationRow | undefined;
+  getAllRows(): readonly WireConversationRow[];
 }
 
 export function closeOpenReasoningRow(

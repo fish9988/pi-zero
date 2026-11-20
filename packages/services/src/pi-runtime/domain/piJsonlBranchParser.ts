@@ -324,5 +324,15 @@ export function readPiUsageRecord(value: unknown): PiUsage | null {
     typeof value["totalTokens"] === "number"
       ? value["totalTokens"]
       : input + output + cacheRead + cacheWrite;
-  return { input, output, cacheRead, cacheWrite, totalTokens };
+  const rawCost = isPiRecord(value["cost"]) ? value["cost"] : null;
+  const cost = rawCost
+    ? {
+        input: typeof rawCost["input"] === "number" ? rawCost["input"] : 0,
+        output: typeof rawCost["output"] === "number" ? rawCost["output"] : 0,
+        cacheRead: typeof rawCost["cacheRead"] === "number" ? rawCost["cacheRead"] : 0,
+        cacheWrite: typeof rawCost["cacheWrite"] === "number" ? rawCost["cacheWrite"] : 0,
+        total: typeof rawCost["total"] === "number" ? rawCost["total"] : 0,
+      }
+    : undefined;
+  return { input, output, cacheRead, cacheWrite, totalTokens, ...(cost ? { cost } : {}) };
 }

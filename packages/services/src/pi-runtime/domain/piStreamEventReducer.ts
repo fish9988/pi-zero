@@ -264,6 +264,10 @@ function reduceMessageEnd(
       state.snapshot.usage,
       message.usage,
       state.contextWindowMax,
+      {
+        rows: state.getAllRows(),
+        modelPricing: state.modelCost,
+      },
     );
     state.turnOutputTokens += addedOutputTokens;
     deltas.push({ op: "state.updated", patch: { usage: nextUsage } });

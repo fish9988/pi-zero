@@ -100,21 +100,34 @@ export function useAnimatedResizablePanel({
 
 const WIDTH_TRANSITION_CLASSES = [
   "transition-[flex-grow]",
-  "duration-200",
+  "duration-150",
   "ease-out",
+  "will-change-[flex-grow]",
   "motion-reduce:transition-none",
 ];
+
+function setDocumentSidePaneResizing(active: boolean) {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (active) {
+    root.dataset.sidePaneResizing = "true";
+  } else {
+    delete root.dataset.sidePaneResizing;
+  }
+}
 
 function prepareWidthTransition(element: HTMLElement) {
   let active = true;
   let frame = 0;
   element.classList.add(...WIDTH_TRANSITION_CLASSES);
+  setDocumentSidePaneResizing(true);
   const dispose = () => {
     if (!active) return;
     active = false;
     window.cancelAnimationFrame(frame);
     element.classList.remove(...WIDTH_TRANSITION_CLASSES);
     element.style.removeProperty("--side-pane-content-width");
+    setDocumentSidePaneResizing(false);
   };
   return {
     dispose,

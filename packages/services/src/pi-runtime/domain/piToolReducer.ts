@@ -300,6 +300,7 @@ export function reduceToolCallAssistantEvent(
     if (!toolCallId) return;
     const tracked = state.toolCallsByCallId.get(toolCallId);
     if (!tracked) return;
+    const prevLen = tracked.inputText.length;
     if (sub.delta.length > 0) {
       tracked.inputText += sub.delta;
       deltas.push({
@@ -309,23 +310,32 @@ export function reduceToolCallAssistantEvent(
         append: sub.delta,
       });
     }
-    const parsed = extractPartialPiToolArgs(
-      tracked.rawToolName,
-      tracked.inputText,
-      state.workspacePath,
-    );
-    if (hasEarlyVisibilityUpdate(tracked.canonicalToolName, tracked.canonicalInput, parsed)) {
-      tracked.canonicalInput = parsed;
-      const existing = state.getRowById(tracked.rowId);
-      if (existing && existing.kind === "toolCall") {
-        deltas.push({
-          op: "row.upserted",
-          row: {
-            ...existing,
-            inputText: tracked.inputText,
-            input: parsed,
-          },
-        });
+    // 性能优化：大模型流式写入大文件参数时 toolcall_delta 可能高达上千次，
+    // 避免每次 4 字节 delta 都对不断增长的 inputText 全量 O(N^2) 重解析；
+    // 首次解析出早期可见摘要后，仅在 4KB 内每 512 字节增量采样一次，完整参数由 toolcall_end 一次性落定。
+    const shouldProbePartial =
+      tracked.inputText.length <= 4096 &&
+      (!tracked.canonicalInput ||
+        Math.floor(tracked.inputText.length / 512) > Math.floor(prevLen / 512));
+    if (shouldProbePartial) {
+      const parsed = extractPartialPiToolArgs(
+        tracked.rawToolName,
+        tracked.inputText,
+        state.workspacePath,
+      );
+      if (hasEarlyVisibilityUpdate(tracked.canonicalToolName, tracked.canonicalInput, parsed)) {
+        tracked.canonicalInput = parsed;
+        const existing = state.getRowById(tracked.rowId);
+        if (existing && existing.kind === "toolCall") {
+          deltas.push({
+            op: "row.upserted",
+            row: {
+              ...existing,
+              inputText: tracked.inputText,
+              input: parsed,
+            },
+          });
+        }
       }
     }
     return;

@@ -82,6 +82,7 @@ import {
 } from "@/app-shell/SidePaneTabTrigger.js";
 import { resolveSidePaneTabsOverflow } from "@/app-shell/sidePaneLayout.js";
 import {
+  MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX,
   resolveAnimatedSidePanePanelLayout,
   resolveOpenTabLauncherItemIds,
   SITES_PLUGIN_ID,
@@ -195,6 +196,15 @@ function readViewportInlineIntersectionSize(element: HTMLElement | null) {
   return Math.max(0, Math.round(visibleRight - visibleLeft));
 }
 
+function quantizeSidePaneInlineSizeForHeavyPreview(widthPx: number | null): number | null {
+  if (widthPx === null) return null;
+  // 下游仅比较 `>= MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX`（96px）；
+  // 量化为两档后，正常拖拽/展开动画期间（240px~1920px）零 React state 变更，避免每像素重渲染整棵侧栏树。
+  return widthPx >= MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX
+    ? MIN_PREVIEW_PANE_HEAVY_CONTENT_VISIBLE_INLINE_SIZE_PX
+    : 0;
+}
+
 function useViewportInlineIntersectionSize<TElement extends HTMLElement>(
   elementRef: RefObject<TElement | null>,
   enabled: boolean,
@@ -203,20 +213,22 @@ function useViewportInlineIntersectionSize<TElement extends HTMLElement>(
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
-      setVisibleInlineSizePx(null);
+      setVisibleInlineSizePx((current) => (current === null ? current : null));
       return;
     }
 
     const element = elementRef.current;
     if (!element) {
-      setVisibleInlineSizePx(null);
+      setVisibleInlineSizePx((current) => (current === null ? current : null));
       return;
     }
 
     let frameId: number | null = null;
     const update = () => {
       frameId = null;
-      const next = readViewportInlineIntersectionSize(element);
+      const next = quantizeSidePaneInlineSizeForHeavyPreview(
+        readViewportInlineIntersectionSize(element),
+      );
       setVisibleInlineSizePx((current) => (current === next ? current : next));
     };
     const scheduleUpdate = () => {
@@ -234,10 +246,6 @@ function useViewportInlineIntersectionSize<TElement extends HTMLElement>(
 
     update();
     window.addEventListener("resize", scheduleUpdate, { passive: true });
-    window.addEventListener("scroll", scheduleUpdate, {
-      capture: true,
-      passive: true,
-    });
 
     const resizeObserver =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleUpdate);
@@ -245,7 +253,6 @@ function useViewportInlineIntersectionSize<TElement extends HTMLElement>(
 
     return () => {
       window.removeEventListener("resize", scheduleUpdate);
-      window.removeEventListener("scroll", scheduleUpdate, { capture: true });
       resizeObserver?.disconnect();
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
@@ -538,9 +545,13 @@ export function AnimatedSidePanePanel({
     right: false,
   });
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const hasActiveCodeViewerTab = useMemo(
+    () => tabs.some((tab) => tab.type === "code-viewer" && tab.id === contentActiveTabId),
+    [contentActiveTabId, tabs],
+  );
   const sidePaneVisibleInlineSizePx = useViewportInlineIntersectionSize(
     panelElementRef,
-    hasRenderedSidePane,
+    hasRenderedSidePane && isVisible && hasActiveCodeViewerTab,
   );
   const isWindowResizeSettling = useWindowResizeSettling(hasRenderedSidePane);
   const panelLayout = resolveAnimatedSidePanePanelLayout({ mobileOverlay });
@@ -1090,7 +1101,10 @@ export function AnimatedSidePanePanel({
                 <div
                   ref={mobileOverlay ? undefined : fullViewSlotRef}
                   data-side-pane-content-slot=""
-                  className={cn("relative min-h-0 flex-1 isolate", mobileOverlay && "min-w-0")}
+                  className={cn(
+                    "relative min-h-0 flex-1 isolate [contain:layout_style]",
+                    mobileOverlay && "min-w-0",
+                  )}
                 >
                   {fullView && !hasVisibleTabs ? (
                     <div className="absolute inset-0 z-10">{openTabLauncher}</div>

@@ -211,6 +211,17 @@ export const sessionUsageStateSchema = z.object({
     cacheReadTokens: z.number(),
     cacheWriteTokens: z.number(),
   }),
+  cost: z
+    .object({
+      totalUsd: z.number().nonnegative(),
+      inputUsd: z.number().nonnegative(),
+      outputUsd: z.number().nonnegative(),
+      cacheReadUsd: z.number().nonnegative(),
+      cacheWriteUsd: z.number().nonnegative(),
+      cacheSavedUsd: z.number().nonnegative(),
+      pricingKnown: z.boolean(),
+    })
+    .optional(),
 });
 export type SessionUsageState = z.infer<typeof sessionUsageStateSchema>;
 
