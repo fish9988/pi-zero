@@ -27,6 +27,7 @@ import {
   isSessionRunningPhase,
   isSessionTerminalPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
+import type { ResolvedPiPromptPayload } from "#src/pi-runtime/adapters/piAttachmentStore.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import {
@@ -43,6 +44,10 @@ export interface PiSessionCommandHost {
   readonly catalog: PiModelCatalog;
   getLiveClient(): PiRpcClient | null;
   ensureClient(): Promise<PiRpcClient>;
+  resolvePromptPayload(
+    text: string,
+    attachments?: UserInputRow["attachments"] | undefined,
+  ): Promise<ResolvedPiPromptPayload>;
   broadcastCommit(commit: ProjectionCommit | null): void;
   applyLiveModelSwitch(target: ResolvedModelTarget): Promise<{
     readonly thought: string;
@@ -82,7 +87,8 @@ async function syncPiFollowUpQueue(host: PiSessionCommandHost): Promise<void> {
     return;
   }
   for (const item of snapshot.queue.items) {
-    await client.followUp(item.text).catch(() => {});
+    const resolved = await host.resolvePromptPayload(item.text, item.attachments);
+    await client.followUp(resolved.message, { images: resolved.images }).catch(() => {});
   }
 }
 
@@ -104,6 +110,7 @@ async function drainNextQueuedItemIfReady(host: PiSessionCommandHost): Promise<v
       commandId: head.sourceCommandId,
       clientId: head.clientId,
       text: head.text,
+      attachments: head.attachments.length > 0 ? head.attachments : undefined,
       modelSelection: head.modelSelection,
       inputOrigin: head.inputOrigin,
     });
@@ -198,12 +205,15 @@ export async function dispatchPiSendText(
       try {
         await host.waitForInFlightPromptDispatch();
         const client = await host.ensureClient();
-        await client.steer(payload.text);
+        const resolved = await host.resolvePromptPayload(payload.text, payload.attachments);
+        await client.steer(resolved.message, { images: resolved.images });
         host.broadcastCommit(
           projector.recordGuidedInput({
             commandId: envelope.commandId,
             clientId: envelope.clientId,
             text: payload.text,
+            attachments: payload.attachments,
+            echoText: resolved.message,
             nowMs: Date.now(),
             modelSelection: payload.modelSelection,
             inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
@@ -233,12 +243,14 @@ export async function dispatchPiSendText(
     try {
       await host.waitForInFlightPromptDispatch();
       const client = await host.ensureClient();
+      const resolved = await host.resolvePromptPayload(payload.text, payload.attachments);
       host.broadcastCommit(
         projector.enqueueQueueMessage({
           sourceCommandId: envelope.commandId,
           queueItemId,
           clientId: envelope.clientId,
           text: payload.text,
+          attachments: payload.attachments,
           nowMs: Date.now(),
           requestedDelivery: payload.requestedDelivery ?? "auto",
           modelSelection: payload.modelSelection,
@@ -246,7 +258,7 @@ export async function dispatchPiSendText(
         }),
       );
       enqueued = true;
-      await client.followUp(payload.text);
+      await client.followUp(resolved.message, { images: resolved.images });
       return createCommandAck({
         commandId: envelope.commandId,
         status: "accepted",
@@ -539,6 +551,7 @@ export async function dispatchPiAuxCommand(
         commandId: envelope.commandId,
         clientId: envelope.clientId,
         text: item.text,
+        attachments: item.attachments.length > 0 ? item.attachments : undefined,
         modelSelection: payload.modelSelection ?? item.modelSelection,
         inputOrigin: envelope.inputOrigin ?? item.inputOrigin,
       });

@@ -1,12 +1,4 @@
-/**
- * 单个 Pi 会话的控制器：管理懒加载 PiRpcClient、PiEventProjector、V4 订阅广播与生命周期。
- *
- * 关键不变量：
- * - draft 空会话绝不拉起 Pi 子进程，也不发布到 sessions-index；首条有效输入到达后才 promote + spawn；
- * - POSIX 管道合帧竞态通过 `agentLifecycleSeq` 防护，且 `disposition === "handled"` 立即收口；
- * - `stop` 一律先 `clear_queue` 再 `abort`，并将队列置为 `autoDrain = false, pauseReason = "stopped"`；
- * - 所有 V4 帧经 `encodeV4TopicFrames`（wireVersion=3 + 物理字节计量）下发。
- */
+/** 单个 Pi 会话的控制器：管理懒加载 PiRpcClient、PiEventProjector、V4 订阅广播与生命周期。 */
 import { randomUUID } from "node:crypto";
 import type {
   ModelSelection,
@@ -39,6 +31,7 @@ import {
   createCommandAck,
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
+import { PiAttachmentStore } from "#src/pi-runtime/adapters/piAttachmentStore.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import {
   PiDeltaCoalescer,
@@ -93,6 +86,7 @@ export class PiSessionController {
   private publishedToIndex = false;
   private readonly projector: PiEventProjector;
   private readonly catalog: PiModelCatalog;
+  private readonly attachments: PiAttachmentStore;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly platform: NodeJS.Platform | undefined;
   private readonly managedRuntimeDir: string | undefined;
@@ -125,6 +119,7 @@ export class PiSessionController {
     this.publishedToIndex = Boolean(options.hydratedFromDisk);
     this.piSessionFile = options.hydratedFromDisk?.filePath;
     this.catalog = options.catalog;
+    this.attachments = options.attachments ?? new PiAttachmentStore();
     this.env = options.env;
     this.platform = options.platform;
     this.managedRuntimeDir = options.managedRuntimeDir;
@@ -159,9 +154,11 @@ export class PiSessionController {
   getTurnFileChanges = (target: { rowId: number; entityId: string }) =>
     this.projector.getTurnFileChanges(target);
   getSubagentDirectorySnapshot = () => this.projector.getSubagentDirectorySnapshot();
-  unsubscribe = (subscriptionId: string) => {
-    this.subscriptions.delete(subscriptionId);
-  };
+  getAttachmentAuthSource = () => ({
+    rows: this.projector.getAllRows(),
+    queueItems: this.projector.getSnapshot().queue.items,
+  });
+  unsubscribe = (subscriptionId: string) => this.subscriptions.delete(subscriptionId);
   updateVirtualSubagentSnapshot(
     snapshot: import("@zcode/shared/zcode-protocol-v4").ConversationSnapshot,
     rows: readonly import("@zcode/shared/zcode-protocol-v4").WireConversationRow[],
@@ -342,6 +339,8 @@ export class PiSessionController {
       catalog: this.catalog,
       getLiveClient: () => (this.client?.alive ? this.client : null),
       ensureClient: () => this.ensureClient(),
+      resolvePromptPayload: (text, attachments) =>
+        this.attachments.resolvePromptPayload(text, attachments),
       broadcastCommit: (commit) => this.broadcastCommit(commit),
       applyLiveModelSwitch: (target) => this.applyLiveModelSwitch(target),
       applyModeSwitch: (mode) => this.applyModeSwitch(mode),
@@ -501,8 +500,11 @@ export class PiSessionController {
         if (isTurnInterrupted()) return makeStartAck();
         const activeClient = await this.syncModelConfigToClient(initialClient);
         if (isTurnInterrupted()) return makeStartAck();
+        const resolved = await this.attachments.resolvePromptPayload(input.text, input.attachments);
+        if (isTurnInterrupted()) return makeStartAck();
+        this.projector.replacePendingUserEcho(input.text, resolved.message);
         const seqBefore = this.projector.getAgentLifecycleSeq();
-        const ack = await activeClient.prompt(input.text);
+        const ack = await activeClient.prompt(resolved.message, { images: resolved.images });
         this.broadcastCommit(
           ack?.disposition === "handled"
             ? this.projector.completeHandledPrompt(Date.now())

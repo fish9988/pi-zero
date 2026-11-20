@@ -397,6 +397,50 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       };
     },
 
+    async attachmentBeginV4(params) {
+      return hub.attachments.begin(params);
+    },
+
+    async attachmentChunkV4(params) {
+      return hub.attachments.chunk(params);
+    },
+
+    async attachmentCommitV4(params) {
+      return hub.attachments.commit(params);
+    },
+
+    async attachmentAbortV4(params) {
+      await hub.attachments.abort(params);
+    },
+
+    async attachmentPreviewSourceV4(params) {
+      return hub.attachments.previewSource(params);
+    },
+
+    async attachmentReadV4(params) {
+      const authorizedLocalRefs = await hub.collectAuthorizedAttachmentLocalRefs(
+        params,
+        params.sessionId,
+      );
+      return hub.attachments.readForPreview(params, { authorizedLocalRefs });
+    },
+
+    async conversationAttachmentReadV4(params) {
+      const authorizedLocalRefs = await hub.collectAuthorizedAttachmentLocalRefs(
+        params,
+        params.sessionId,
+      );
+      return hub.attachments.readForConversation(params, { authorizedLocalRefs });
+    },
+
+    async conversationAttachmentStatV4(params) {
+      const authorizedLocalRefs = await hub.collectAuthorizedAttachmentLocalRefs(
+        params,
+        params.sessionId,
+      );
+      return hub.attachments.statForConversation(params, { authorizedLocalRefs });
+    },
+
     async getSessionLifecycle(params) {
       return (
         hub.getWorkspace(params)?.sessions.get(params.sessionId)?.getLifecycleSnapshot() ?? null

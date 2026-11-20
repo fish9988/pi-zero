@@ -239,6 +239,29 @@ export function readPiUserContentText(content: unknown): string {
   return chunks.join("\n");
 }
 
+export interface ParsedPiUserImageBlock {
+  readonly data: string;
+  readonly mimeType: string;
+}
+
+export function readPiUserContentImages(content: unknown): readonly ParsedPiUserImageBlock[] {
+  if (!Array.isArray(content)) return [];
+  const images: ParsedPiUserImageBlock[] = [];
+  for (const block of content) {
+    if (
+      isPiRecord(block) &&
+      block["type"] === "image" &&
+      typeof block["data"] === "string" &&
+      block["data"].length > 0 &&
+      typeof block["mimeType"] === "string" &&
+      block["mimeType"].length > 0
+    ) {
+      images.push({ data: block["data"], mimeType: block["mimeType"] });
+    }
+  }
+  return images;
+}
+
 export function parsePiModelChangeEntry(entry: Record<string, unknown>): {
   provider: string;
   model: string;

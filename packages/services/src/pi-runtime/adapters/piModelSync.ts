@@ -20,6 +20,7 @@ import {
 } from "#src/pi-runtime/domain/piModelCapability.js";
 import { createInitialSessionConfig } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { discoverPi } from "#src/pi-runtime/adapters/piDiscover.js";
+import type { PiAttachmentStore } from "#src/pi-runtime/adapters/piAttachmentStore.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
 import { preparePiSessionFileForSpawn } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
@@ -54,6 +55,7 @@ export interface PiSessionControllerOptions {
   readonly thoughtLevel?: string | undefined;
   readonly mode?: string | undefined;
   readonly catalog: PiModelCatalog;
+  readonly attachments?: PiAttachmentStore | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly platform?: NodeJS.Platform | undefined;
   readonly managedRuntimeDir?: string | undefined;

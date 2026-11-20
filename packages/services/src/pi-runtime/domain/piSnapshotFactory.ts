@@ -253,6 +253,7 @@ export interface CreateQueueItemInput {
   clientId: string;
   kind?: "sendText" | "sendGoalCommand" | "compact";
   text: string;
+  attachments?: QueueItem["attachments"] | undefined;
   admissionSeq: number;
   queuePosition: number;
   admittedAt: number;
@@ -269,7 +270,7 @@ export function createQueueItem(input: CreateQueueItemInput): QueueItem {
     clientId: input.clientId,
     kind: input.kind ?? "sendText",
     text: input.text,
-    attachments: [],
+    attachments: input.attachments ? [...input.attachments] : [],
     ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
     delivery: {
       requested: input.requestedDelivery ?? "queue",

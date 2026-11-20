@@ -88,6 +88,10 @@ export interface RecordGuidedInputParams {
   readonly clientId: string;
   readonly text: string;
   readonly nowMs: number;
+  readonly attachments?:
+    | import("@zcode/shared/zcode-protocol-v4").UserInputRow["attachments"]
+    | undefined;
+  readonly echoText?: string | undefined;
   readonly modelSelection?: ModelSelection | undefined;
   readonly inputOrigin?: "desktop" | "mobile" | undefined;
 }
@@ -371,14 +375,21 @@ export class PiEventProjector {
           text: input.text,
           commandId: input.commandId,
           clientId: input.clientId,
+          attachments: input.attachments,
           guided: true,
           modelSelection: input.modelSelection ?? this.state.snapshot.config.modelSelection,
           inputOrigin: input.inputOrigin,
         }),
       },
     ];
-    this.state.pendingUserEchoes.push(input.text);
+    this.state.pendingUserEchoes.push(input.echoText ?? input.text);
     return this.commitDeltas(deltas, false);
+  }
+
+  replacePendingUserEcho(expectedText: string, actualSentText: string): void {
+    if (expectedText === actualSentText) return;
+    const idx = this.state.pendingUserEchoes.indexOf(expectedText);
+    if (idx >= 0) this.state.pendingUserEchoes[idx] = actualSentText;
   }
 
   enqueueQueueMessage(input: {
@@ -386,6 +397,7 @@ export class PiEventProjector {
     queueItemId: string;
     clientId: string;
     text: string;
+    attachments?: import("@zcode/shared/zcode-protocol-v4").UserInputRow["attachments"] | undefined;
     nowMs: number;
     requestedDelivery?: "auto" | "startNow" | "queue" | "guide";
     modelSelection?: ModelSelection | undefined;

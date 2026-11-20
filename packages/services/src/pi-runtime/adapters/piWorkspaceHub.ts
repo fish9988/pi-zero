@@ -24,6 +24,10 @@ import {
   createWorkspaceConfigSnapshot,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import {
+  PiAttachmentStore,
+  collectAuthorizedAttachmentLocalRefs,
+} from "#src/pi-runtime/adapters/piAttachmentStore.js";
+import {
   emitSessionsIndexDeltaFrames,
   emitSessionsIndexSnapshotFrames,
   emitWorkspaceConfigDeltaFrames,
@@ -63,6 +67,7 @@ export class PiWorkspaceHub {
   private readonly generationByWorkspaceKey = new Map<string, number>();
   private readonly sessionRegistryListeners = new Set<() => void>();
   private readonly catalog: PiModelCatalog;
+  readonly attachments = new PiAttachmentStore();
   private readonly scanner: PiSessionIndexScanner;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly platform: NodeJS.Platform | undefined;
@@ -140,6 +145,7 @@ export class PiWorkspaceHub {
       thoughtLevel: input.thoughtLevel,
       mode: input.mode,
       catalog: this.catalog,
+      attachments: this.attachments,
       env: this.env,
       platform: this.platform,
       managedRuntimeDir: this.managedRuntimeDir,
@@ -274,6 +280,7 @@ export class PiWorkspaceHub {
         catalog: this.catalog,
       });
       if (!loaded || bucket.disposed) return null;
+      this.attachments.registerInlineAttachments(loaded.hydrated.inlineAttachments);
       return (
         bucket.sessions.get(sessionId) ??
         this.createSessionController(bucket, {
@@ -492,6 +499,7 @@ export class PiWorkspaceHub {
       catalog: this.catalog,
     });
     if (!loaded || bucket.disposed) return;
+    this.attachments.registerInlineAttachments(loaded.hydrated.inlineAttachments);
     if (existing) {
       existing.reloadFromHydratedDisk(loaded.filePath, loaded.hydrated);
     } else {
@@ -616,11 +624,25 @@ export class PiWorkspaceHub {
     await this.disposeBucket(bucket);
   }
 
+  async collectAuthorizedAttachmentLocalRefs(
+    target: ZCodeAgentWorkspaceTarget,
+    sessionId: string,
+  ): Promise<ReadonlyMap<string, string>> {
+    const bucket = this.getWorkspace(target);
+    const controller =
+      bucket?.sessions.get(sessionId) ??
+      (bucket ? await this.tryHydrateDiskSession(bucket, sessionId) : null);
+    if (!controller) return new Map();
+    const { rows, queueItems } = controller.getAttachmentAuthSource();
+    return collectAuthorizedAttachmentLocalRefs(rows, queueItems);
+  }
+
   async disposeAllAndWait(): Promise<void> {
     this.sessionRegistryListeners.clear();
     const allBuckets = [...this.workspaces.values()];
     this.workspaces.clear();
     await Promise.all(allBuckets.map((bucket) => this.disposeBucket(bucket)));
+    this.attachments.dispose();
     this.scanner.dispose();
   }
 

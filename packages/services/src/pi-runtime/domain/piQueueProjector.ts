@@ -27,6 +27,7 @@ export function enqueueQueueText(
     queueItemId: string;
     clientId: string;
     text: string;
+    attachments?: QueueItem["attachments"] | undefined;
     admissionSeq: number;
     admittedAt: number;
     requestedDelivery?: "auto" | "startNow" | "queue" | "guide";

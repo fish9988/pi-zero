@@ -390,6 +390,7 @@ export function buildDequeuedUserTurnDeltas(
         text: item.text,
         commandId: item.sourceCommandId,
         clientId: item.clientId,
+        attachments: item.attachments.length > 0 ? item.attachments : undefined,
         modelSelection: item.modelSelection,
         inputOrigin: item.inputOrigin,
       }),

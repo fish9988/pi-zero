@@ -9,6 +9,7 @@
  * - 还原 `compaction`、`model_change`、`thinking_level_change`、`session_info` 与累计 usage。
  */
 import type {
+  AttachmentRef,
   ConversationSnapshot,
   SessionConfigState,
   SessionPhase,
@@ -27,6 +28,7 @@ import {
   parsePiJsonlDocument,
   parsePiModelChangeEntry,
   readPiUsageRecord,
+  readPiUserContentImages,
   readPiUserContentText,
   recordHydratedFileDiff,
   resolveActivePiBranchEntries,
@@ -58,6 +60,13 @@ import type { PiTurnFileChangeEntry } from "#src/pi-runtime/domain/piTurnSettlem
 
 export { resolveActivePiBranchEntries };
 
+export interface HydratedPiInlineAttachment {
+  readonly ref: string;
+  readonly fileName: string;
+  readonly mime: string;
+  readonly dataBase64: string;
+}
+
 export interface HydratedPiSessionResult {
   readonly sessionId: string;
   readonly cwd: string;
@@ -72,6 +81,7 @@ export interface HydratedPiSessionResult {
   readonly usage: ConversationSnapshot["usage"];
   readonly rows: WireConversationRow[];
   readonly fileChangesByTurnId: Map<string, V4ConversationFileChangesResult>;
+  readonly inlineAttachments: readonly HydratedPiInlineAttachment[];
 }
 
 export interface HydratePiJsonlSessionInput {
@@ -112,6 +122,7 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
 
   const rows: WireConversationRow[] = [];
   const fileChangesByTurnId = new Map<string, V4ConversationFileChangesResult>();
+  const inlineAttachments: HydratedPiInlineAttachment[] = [];
   const catalogModels = input.catalogModels ?? [];
 
   let nextRowId = 0;
@@ -308,13 +319,36 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
     if (role === "user") {
       settleOpenTurnHeader();
       const text = readPiUserContentText(msg["content"]);
+      const imageBlocks = readPiUserContentImages(msg["content"]);
       if (firstUserTitle === null) {
         const cleaned = cleanPiSessionTitle(text);
         if (cleaned) firstUserTitle = cleaned;
       }
-      const cmdId = `hydrated_${typeof entry["id"] === "string" ? entry["id"] : nextRowId + 1}`;
+      const entryKey = typeof entry["id"] === "string" ? entry["id"] : String(nextRowId + 1);
+      const cmdId = `hydrated_${entryKey}`;
       const turnId = ensureTurnHeader(msgTs, cmdId);
       const userRowId = ++nextRowId;
+      let attachments: AttachmentRef[] | undefined;
+      if (imageBlocks.length > 0) {
+        attachments = imageBlocks.map((img, idx) => {
+          const ext =
+            img.mimeType
+              .split("/")[1]
+              ?.split(";")[0]
+              ?.replace(/[^a-z0-9]/gi, "") || "png";
+          const fileName = `image-${idx + 1}.${ext}`;
+          const ref = `pi-inline://${sessionId}/${entryKey}/${idx}`;
+          const padding = img.data.endsWith("==") ? 2 : img.data.endsWith("=") ? 1 : 0;
+          const bytes = Math.max(0, Math.floor((img.data.length * 3) / 4) - padding);
+          inlineAttachments.push({
+            ref,
+            fileName,
+            mime: img.mimeType,
+            dataBase64: img.data,
+          });
+          return { ref, fileName, mime: img.mimeType, bytes };
+        });
+      }
       rows.push(
         buildUserInputRow({
           rowId: userRowId,
@@ -324,6 +358,7 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
           text,
           commandId: cmdId,
           clientId: "pi-hydrated",
+          attachments,
         }),
       );
       activeTurnLastTs = msgTs;
@@ -571,5 +606,6 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
     usage,
     rows,
     fileChangesByTurnId,
+    inlineAttachments,
   };
 }

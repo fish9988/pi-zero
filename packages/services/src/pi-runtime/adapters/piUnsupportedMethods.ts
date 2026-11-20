@@ -162,14 +162,6 @@ export type PiUnsupportedAgentMethods = Pick<
   | "conversationWorkflowRunNodeResultV4"
   | "backgroundBashOutputV4"
   | "conversationFileRewindPreviewV4"
-  | "attachmentBeginV4"
-  | "attachmentChunkV4"
-  | "attachmentCommitV4"
-  | "attachmentAbortV4"
-  | "attachmentPreviewSourceV4"
-  | "attachmentReadV4"
-  | "conversationAttachmentReadV4"
-  | "conversationAttachmentStatV4"
   | "onDynamicLocalTtftFacts"
   | "onDynamicConversationTelemetryFact"
   | "getContextComposition"
@@ -330,14 +322,6 @@ export function createPiUnsupportedAgentMethods(): PiUnsupportedAgentMethods {
     conversationWorkflowRunNodeResultV4: () => unsupported("conversationWorkflowRunNodeResultV4"),
     backgroundBashOutputV4: () => unsupported("backgroundBashOutputV4"),
     conversationFileRewindPreviewV4: () => unsupported("conversationFileRewindPreviewV4"),
-    attachmentBeginV4: () => unsupported("attachmentBeginV4"),
-    attachmentChunkV4: () => unsupported("attachmentChunkV4"),
-    attachmentCommitV4: () => unsupported("attachmentCommitV4"),
-    attachmentAbortV4: async () => {},
-    attachmentPreviewSourceV4: () => unsupported("attachmentPreviewSourceV4"),
-    attachmentReadV4: () => unsupported("attachmentReadV4"),
-    conversationAttachmentReadV4: () => unsupported("conversationAttachmentReadV4"),
-    conversationAttachmentStatV4: () => unsupported("conversationAttachmentStatV4"),
     onDynamicLocalTtftFacts: () => RpcEvent.None,
     onDynamicConversationTelemetryFact: () => RpcEvent.None,
     getContextComposition: async () => null,
