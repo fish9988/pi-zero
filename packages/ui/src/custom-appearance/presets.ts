@@ -77,9 +77,9 @@ export const DEFAULT_CUSTOM_APPEARANCE_CONFIG: CustomAppearanceConfig = {
 export const BUILTIN_APPEARANCE_PRESETS: AppearancePreset[] = [
   {
     id: "zcode-native",
-    name: "ZCode 原生默认",
-    badge: "官方原版",
-    description: "还原 ZCode 官方原始配色与控件质感，只保留字体和宽度等自由调节。",
+    name: "Pi Zero 原生默认",
+    badge: "原生默认",
+    description: "还原 Pi Zero 原生配色与控件质感，只保留字体和宽度等自由调节。",
     designLanguage: "default",
     recommendedMode: "dark",
     patch: {

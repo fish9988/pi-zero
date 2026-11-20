@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog.js";
 import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import {
   PiCard,
   PiRow,
@@ -67,6 +68,7 @@ function mergeBuiltinProviders(live: readonly PiProviderAuthStatus[]): PiProvide
 export function PiCredentialsSection() {
   const service = usePiConfigService();
   const { tr } = usePiText();
+  const confirmDialog = useConfirmDialog();
   const [snapshot, setSnapshot] = useState<PiAuthAndProvidersSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -150,6 +152,17 @@ export function PiCredentialsSection() {
 
   const handleRemoveCredential = async (provider: PiProviderAuthStatus) => {
     if (!service) return;
+    const confirmed = await confirmDialog({
+      title: tr(`移除 ${provider.name} 凭据？`, `Remove ${provider.name} credential?`),
+      description: tr(
+        "将从 ~/.pi/agent/auth.json 删除该 Provider 的已保存密钥或登录状态。",
+        "This removes the saved API key or OAuth session from ~/.pi/agent/auth.json.",
+      ),
+      confirmLabel: tr("移除", "Remove"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
     try {
       const next = await service.mutateAuthOrProvider({
         op: "removeCredential",
@@ -184,6 +197,17 @@ export function PiCredentialsSection() {
 
   const handleRemoveEnv = async (name: string) => {
     if (!service) return;
+    const confirmed = await confirmDialog({
+      title: tr(`移除环境变量 ${name}？`, `Remove environment variable ${name}?`),
+      description: tr(
+        "将从 ~/.pi/agent/.env 删除该变量。",
+        "This removes the variable from ~/.pi/agent/.env.",
+      ),
+      confirmLabel: tr("移除", "Remove"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
     try {
       const next = await service.mutateAuthOrProvider({ op: "removeEnv", name });
       setSnapshot(next);

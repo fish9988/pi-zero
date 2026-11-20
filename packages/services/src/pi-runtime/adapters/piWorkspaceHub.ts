@@ -16,6 +16,7 @@ import type {
   ZCodeAgentRuntimeLifecycleEvent,
   ZCodeAgentWorkspaceTarget,
 } from "#src/zcode-agent/zcodeAgent.js";
+import type { PiDiscoveredSessionRecord } from "#src/pi-runtime/contract.js";
 import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
 import { buildWorkspaceConfigStateFromPiModels } from "#src/pi-runtime/domain/piModelCapability.js";
 import {
@@ -43,9 +44,13 @@ import {
   reloadRewoundPiSessionFromDisk,
   type PiWorkspaceBucket,
 } from "#src/pi-runtime/adapters/piSessionHydration.js";
-import { PiSessionIndexScanner } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
+import {
+  PiSessionIndexScanner,
+  normalizeWorkspacePathKey,
+} from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
 
 const TASK_INDEX_SUBSCRIBER_SCOPE = "task-index";
+const LIVE_SESSION_REGISTRY_DEBOUNCE_MS = 120;
 
 export type { PiWorkspaceBucket };
 
@@ -56,6 +61,7 @@ export function commandCacheKey(sessionId: string | null, commandId: string): st
 export class PiWorkspaceHub {
   private readonly workspaces = new Map<string, PiWorkspaceBucket>();
   private readonly generationByWorkspaceKey = new Map<string, number>();
+  private readonly sessionRegistryListeners = new Set<() => void>();
   private readonly catalog: PiModelCatalog;
   private readonly scanner: PiSessionIndexScanner;
   private readonly env: NodeJS.ProcessEnv | undefined;
@@ -144,6 +150,7 @@ export class PiWorkspaceHub {
         onSessionPublishedOrUpdated: (summary) => {
           bucket.deletedSessionIds.delete(summary.sessionId);
           this.emitSessionsIndexDeltas(bucket, [{ op: "session.upserted", session: summary }]);
+          this.notifySessionRegistryChanged();
         },
         onSessionLifecycleChanged: (snapshot) => bucket.sessionLifecycleEmitter.fire(snapshot),
         onSessionDeleted: (deletedSessionId) => {
@@ -153,6 +160,7 @@ export class PiWorkspaceHub {
           this.emitSessionsIndexDeltas(bucket, [
             { op: "session.removed", sessionId: deletedSessionId },
           ]);
+          this.notifySessionRegistryChanged();
         },
         onVirtualSubagentSessionsUpdated: (payloads) => {
           for (const payload of payloads) {
@@ -514,6 +522,92 @@ export class PiWorkspaceHub {
     return null;
   }
 
+  async listAllPiSessions(): Promise<PiDiscoveredSessionRecord[]> {
+    const deletedIds = new Set<string>();
+    for (const bucket of this.workspaces.values()) {
+      for (const deletedId of bucket.deletedSessionIds) deletedIds.add(deletedId);
+    }
+
+    const diskRecords = await this.scanner.scanAll("");
+    const bySessionId = new Map<string, PiDiscoveredSessionRecord>();
+    for (const record of diskRecords) {
+      if (deletedIds.has(record.sessionId)) continue;
+      bySessionId.set(record.sessionId, {
+        sessionId: record.sessionId,
+        cwd: record.cwd,
+        normalizedCwd: record.normalizedCwd,
+        file: record.file,
+        title: record.summary.title,
+        titleSource: record.summary.titleSource === "custom" ? "custom" : "default",
+        createdAt: record.summary.createdAt,
+        lastActivityAt: record.summary.lastActivityAt,
+        ...(record.summary.lastOutcome ? { lastOutcome: record.summary.lastOutcome } : {}),
+        ...(record.summary.parentSessionId
+          ? { parentSessionId: record.summary.parentSessionId }
+          : {}),
+        live: false,
+      });
+    }
+
+    for (const bucket of this.workspaces.values()) {
+      if (bucket.disposed) continue;
+      for (const [sessionId, controller] of bucket.sessions) {
+        if (deletedIds.has(sessionId) || controller.readOnly || !controller.isPublishedToIndex()) {
+          continue;
+        }
+        const summary = controller.getSummary();
+        const cwd = controller.cwd || bucket.workspacePath;
+        const normalizedCwd = normalizeWorkspacePathKey(cwd, this.platform);
+        if (!normalizedCwd) continue;
+        const existing = bySessionId.get(sessionId);
+        const file = controller.getSessionFilePath() ?? existing?.file;
+        bySessionId.set(sessionId, {
+          sessionId,
+          cwd,
+          normalizedCwd,
+          ...(file ? { file } : {}),
+          title: summary.title || existing?.title || "",
+          titleSource: summary.titleSource === "custom" ? "custom" : "default",
+          createdAt: summary.createdAt,
+          lastActivityAt: Math.max(summary.lastActivityAt, existing?.lastActivityAt ?? 0),
+          ...(summary.lastOutcome ? { lastOutcome: summary.lastOutcome } : {}),
+          ...(summary.parentSessionId ? { parentSessionId: summary.parentSessionId } : {}),
+          live: true,
+        });
+      }
+    }
+
+    return [...bySessionId.values()].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  }
+
+  watchAllPiSessions(onChange: () => void): () => void {
+    let closed = false;
+    let liveTimer: ReturnType<typeof setTimeout> | null = null;
+    const stopDiskWatch = this.scanner.watchSessions(() => {
+      if (!closed) onChange();
+    });
+    const onLiveChange = () => {
+      if (closed) return;
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(() => {
+        liveTimer = null;
+        if (!closed) onChange();
+      }, LIVE_SESSION_REGISTRY_DEBOUNCE_MS);
+      liveTimer.unref?.();
+    };
+    this.sessionRegistryListeners.add(onLiveChange);
+    return () => {
+      if (closed) return;
+      closed = true;
+      if (liveTimer) {
+        clearTimeout(liveTimer);
+        liveTimer = null;
+      }
+      this.sessionRegistryListeners.delete(onLiveChange);
+      stopDiskWatch();
+    };
+  }
+
   async disposeWorkspace(target: ZCodeAgentWorkspaceTarget): Promise<void> {
     const key = resolveWorkspaceKey(target);
     const bucket = this.workspaces.get(key);
@@ -523,10 +617,17 @@ export class PiWorkspaceHub {
   }
 
   async disposeAllAndWait(): Promise<void> {
+    this.sessionRegistryListeners.clear();
     const allBuckets = [...this.workspaces.values()];
     this.workspaces.clear();
     await Promise.all(allBuckets.map((bucket) => this.disposeBucket(bucket)));
     this.scanner.dispose();
+  }
+
+  private notifySessionRegistryChanged(): void {
+    for (const listener of this.sessionRegistryListeners) {
+      listener();
+    }
   }
 
   private emitSessionsIndexDeltas(

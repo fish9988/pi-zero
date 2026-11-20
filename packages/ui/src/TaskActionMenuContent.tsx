@@ -37,8 +37,12 @@ export function TaskActionMenuContent({
   onOpenTaskPathInFileManager,
   onCopyWorkspacePath,
   onCopyTaskPath,
+  onCopyPiResumeCommand,
   onCopyTaskLogPath,
   onCopySessionId,
+  onOpenPiBtw,
+  onOpenPiTree,
+  onExportPiHtml,
   onViewModelTrajectory,
   onOpenProviderConfig,
 }: {
@@ -76,8 +80,12 @@ export function TaskActionMenuContent({
   onOpenTaskPathInFileManager: () => void;
   onCopyWorkspacePath: () => void;
   onCopyTaskPath: () => void;
+  onCopyPiResumeCommand?: () => void;
   onCopyTaskLogPath: () => void;
   onCopySessionId?: () => void;
+  onOpenPiBtw?: () => void;
+  onOpenPiTree?: () => void;
+  onExportPiHtml?: () => void;
   onViewModelTrajectory?: () => void;
   onOpenProviderConfig: () => void;
 }) {
@@ -168,6 +176,16 @@ export function TaskActionMenuContent({
       >
         {intl.formatMessage({ id: "appHeader.copyTaskPath" })}
       </Item>
+      {onCopyPiResumeCommand ? (
+        <Item
+          data-testid="task-copy-pi-resume-cmd"
+          disabled={taskTargetActionsDisabled || taskSessionFile.loading || !taskSessionFile.path}
+          title={taskTargetActionsDisabled ? disabledReason : undefined}
+          onSelect={onCopyPiResumeCommand}
+        >
+          {intl.formatMessage({ id: "appHeader.copyPiResumeCommand" })}
+        </Item>
+      ) : null}
       <Item
         disabled={
           taskTargetActionsDisabled ||
@@ -206,6 +224,41 @@ export function TaskActionMenuContent({
             {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
           </span>
         </Item>
+      ) : null}
+      {onOpenPiBtw || onOpenPiTree || onExportPiHtml ? (
+        <>
+          <Separator />
+          {onOpenPiBtw ? (
+            <Item
+              data-testid="task-pi-btw"
+              disabled={disableTaskActions}
+              title={disableTaskActions ? disabledReason : undefined}
+              onSelect={onOpenPiBtw}
+            >
+              {intl.formatMessage({ id: "appHeader.piBtw" })}
+            </Item>
+          ) : null}
+          {onOpenPiTree ? (
+            <Item
+              data-testid="task-pi-tree"
+              disabled={taskTargetActionsDisabled || !activeSessionId}
+              title={taskTargetActionsDisabled ? disabledReason : undefined}
+              onSelect={onOpenPiTree}
+            >
+              {intl.formatMessage({ id: "appHeader.piBranchTree" })}
+            </Item>
+          ) : null}
+          {onExportPiHtml ? (
+            <Item
+              data-testid="task-pi-export"
+              disabled={taskTargetActionsDisabled || !activeSessionId}
+              title={taskTargetActionsDisabled ? disabledReason : undefined}
+              onSelect={onExportPiHtml}
+            >
+              {intl.formatMessage({ id: "appHeader.piExportHtml" })}
+            </Item>
+          ) : null}
+        </>
       ) : null}
       {onViewModelTrajectory ? (
         <>

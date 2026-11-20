@@ -17,6 +17,7 @@ export type {
   PiCompactionReason,
   PiContentBlock,
   PiCustomAgentMessage,
+  PiDiscoveredSessionRecord,
   PiDiscoverOptions,
   PiEditToolArgs,
   PiEditToolItem,

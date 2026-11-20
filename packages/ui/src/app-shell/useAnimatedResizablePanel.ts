@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { acquireSidePaneResizingFlag } from "@/components/ui/resizable.js";
 
 export function useAnimatedResizablePanel({
   open,
@@ -50,38 +51,47 @@ export function useAnimatedResizablePanel({
     // 如果我们同一拍就立刻调用 collapse/expand，偶发会早于约束注册完成，触发
     // “Panel constraints not found” 崩溃。这里延后一帧，确保面板先完成注册再执行尺寸命令。
     const rafId = window.requestAnimationFrame(() => {
-      const groupWidth =
-        transition && element
-          ? Array.from(
-              element.parentElement!.querySelectorAll<HTMLElement>(":scope > [data-panel]"),
-            ).reduce((width, panel) => width + panel.offsetWidth, 0)
-          : 0;
-      const previousSize = panel.getSize().asPercentage;
-      if (isVisible) {
-        const nextExpandedSize = expandedSizeRef.current;
-        if (nextExpandedSize) {
-          panel.resize(nextExpandedSize);
-        } else {
-          panel.expand();
-        }
-      } else {
-        if (rememberExpandedSize) {
-          const currentSize = panel.getSize().asPercentage;
-          if (Number.isFinite(currentSize) && currentSize > 0) {
-            expandedSizeRef.current = `${currentSize}%`;
+      let settled = false;
+      try {
+        const parentElement = element?.parentElement;
+        const groupWidth =
+          transition && element && parentElement
+            ? Array.from(
+                parentElement.querySelectorAll<HTMLElement>(":scope > [data-panel]"),
+              ).reduce((width, panelEl) => width + panelEl.offsetWidth, 0)
+            : 0;
+        const previousSize = panel.getSize().asPercentage;
+        if (isVisible) {
+          const nextExpandedSize = expandedSizeRef.current;
+          if (nextExpandedSize) {
+            panel.resize(nextExpandedSize);
+          } else {
+            panel.expand();
           }
+        } else {
+          if (rememberExpandedSize) {
+            const currentSize = panel.getSize().asPercentage;
+            if (Number.isFinite(currentSize) && currentSize > 0) {
+              expandedSizeRef.current = `${currentSize}%`;
+            }
+          }
+          panel.collapse();
         }
-        panel.collapse();
-      }
-      if (transition && element) {
-        // getSize 的百分比是 Panel owner 的目标值，像素值却是动画中的 DOM 宽度。
-        // 用目标比例锁住展开内容，避免收起或快速反向时 Tabs/终端先被挤压换行。
-        const targetSize = isVisible ? panel.getSize().asPercentage : previousSize;
-        element.style.setProperty(
-          "--side-pane-content-width",
-          `${(groupWidth * targetSize) / 100}px`,
-        );
-        transition.settle();
+        if (transition && element) {
+          // getSize 的百分比是 Panel owner 的目标值，像素值却是动画中的 DOM 宽度。
+          // 用目标比例锁住展开内容，避免收起或快速反向时 Tabs/终端先被挤压换行。
+          const targetSize = isVisible ? panel.getSize().asPercentage : previousSize;
+          element.style.setProperty(
+            "--side-pane-content-width",
+            `${(groupWidth * targetSize) / 100}px`,
+          );
+          transition.settle();
+          settled = true;
+        }
+      } finally {
+        if (transition && !settled) {
+          transition.dispose();
+        }
       }
     });
 
@@ -106,28 +116,18 @@ const WIDTH_TRANSITION_CLASSES = [
   "motion-reduce:transition-none",
 ];
 
-function setDocumentSidePaneResizing(active: boolean) {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  if (active) {
-    root.dataset.sidePaneResizing = "true";
-  } else {
-    delete root.dataset.sidePaneResizing;
-  }
-}
-
 function prepareWidthTransition(element: HTMLElement) {
   let active = true;
   let frame = 0;
   element.classList.add(...WIDTH_TRANSITION_CLASSES);
-  setDocumentSidePaneResizing(true);
+  const releaseResizingFlag = acquireSidePaneResizingFlag();
   const dispose = () => {
     if (!active) return;
     active = false;
     window.cancelAnimationFrame(frame);
     element.classList.remove(...WIDTH_TRANSITION_CLASSES);
     element.style.removeProperty("--side-pane-content-width");
-    setDocumentSidePaneResizing(false);
+    releaseResizingFlag();
   };
   return {
     dispose,
@@ -135,13 +135,17 @@ function prepareWidthTransition(element: HTMLElement) {
       // 等 Panel 的目标布局提交后读取真实过渡；完成、取消和零变化都能清理，
       // 不靠 200ms 定时器猜测结束，旧动画的完成回调也不能清理新一轮样式。
       frame = window.requestAnimationFrame(() => {
-        const animations = element
-          .getAnimations()
-          .filter(
-            (animation) =>
-              animation instanceof CSSTransition && animation.transitionProperty === "flex-grow",
-          );
-        void Promise.allSettled(animations.map((animation) => animation.finished)).then(dispose);
+        try {
+          const animations = element
+            .getAnimations()
+            .filter(
+              (animation) =>
+                animation instanceof CSSTransition && animation.transitionProperty === "flex-grow",
+            );
+          void Promise.allSettled(animations.map((animation) => animation.finished)).then(dispose);
+        } catch {
+          dispose();
+        }
       });
     },
   };

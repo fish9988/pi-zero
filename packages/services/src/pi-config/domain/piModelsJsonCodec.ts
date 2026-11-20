@@ -10,12 +10,20 @@ import type {
   ProviderSettingsProviderView,
 } from "@zcode/provider";
 import {
+  buildTierEntryForFormat,
+  compileThinkingProfileToOptionSpec,
+  isOffThinkingLevel,
+  parseOptionSpecToThinkingProfile,
+  resolveDefaultThinkingFormat,
+} from "@zcode/shared/model-config";
+import {
   PI_THINKING_LEVELS,
   type PiCustomKeyState,
   type PiCustomModelEntry,
   type PiCustomProviderSaveInput,
   type PiCustomProviderSummary,
   type PiCustomThinkingLevelMap,
+  type PiThinkingLevel,
 } from "@zcode/shared/pi-config";
 import {
   hasControlChars,
@@ -290,15 +298,31 @@ export function removePiCustomProviderFromText(
   return { changed: true, text: serializeModelsJson(root, originalText) };
 }
 
+const DEFAULT_PI_CONTEXT_WINDOW = 128_000;
+const DEFAULT_PI_MAX_OUTPUT_TOKENS = 16_384;
+
 function buildThinkingLevelMapFromZCodeLevels(
   levels: readonly string[] | null | undefined,
+  celMap?: string | null | undefined,
 ): PiCustomThinkingLevelMap | null {
   if (!levels || levels.length === 0) return null;
+  const wireByLevel = new Map<string, string>();
+  if (typeof celMap === "string" && celMap.trim() !== "") {
+    const profile = parseOptionSpecToThinkingProfile(levels, celMap);
+    if (profile.format !== "custom-cel" && profile.format !== "noop") {
+      for (const tier of profile.tiers) {
+        if (tier.action === "value" && tier.wireValue?.trim()) {
+          wireByLevel.set(tier.id.trim().toLowerCase(), tier.wireValue.trim());
+        }
+      }
+    }
+  }
   const normalized = new Map<string, string>();
   for (const raw of levels) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
-    normalized.set(trimmed.toLowerCase(), trimmed);
+    const lower = trimmed.toLowerCase();
+    normalized.set(lower, wireByLevel.get(lower) ?? trimmed);
   }
   const hasRecognized = PI_THINKING_LEVELS.some((level) => normalized.has(level));
   if (!hasRecognized) return null;
@@ -335,7 +359,7 @@ export function resolvePiKeyWriteInputFromUiValue(
   return { kind: "literal", value: trimmed };
 }
 
-function resolveReasoningLevelsFromPiModel(model: PiCustomModelEntry): string[] {
+function resolveReasoningLevelsFromPiModel(model: PiCustomModelEntry): PiThinkingLevel[] {
   if (model.thinkingLevelMap && Object.keys(model.thinkingLevelMap).length > 0) {
     const enabled = PI_THINKING_LEVELS.filter((level) => {
       const mapped = model.thinkingLevelMap?.[level];
@@ -346,34 +370,74 @@ function resolveReasoningLevelsFromPiModel(model: PiCustomModelEntry): string[] 
   if (model.reasoning === true) {
     return ["low", "medium", "high"];
   }
-  return [];
+  return ["off"];
+}
+
+function resolveReasoningSpecFromPiModel(
+  model: PiCustomModelEntry,
+  apiType: ProviderApiType,
+): { readonly values: readonly string[]; readonly map: string } {
+  const levels = resolveReasoningLevelsFromPiModel(model);
+  const hasReasoning = levels.some((level) => !isOffThinkingLevel(level));
+  if (!hasReasoning) {
+    return { values: ["off"], map: "{}" };
+  }
+  const format = resolveDefaultThinkingFormat(apiType);
+  const tiers = levels.map((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    const wireOverride =
+      typeof mapped === "string" && mapped.trim() !== "" ? mapped.trim() : undefined;
+    return buildTierEntryForFormat(level, format, wireOverride);
+  });
+  return compileThinkingProfileToOptionSpec({ format, tiers });
 }
 
 /** 将 Pi `models.json` 单条模型投影为 ZCode 设置页可读写的 `ProviderSettingsModelView`。 */
 export function projectPiCustomModelToSettingsView(
   model: PiCustomModelEntry,
+  apiType: ProviderApiType = "openai-chat-completions",
 ): ProviderSettingsModelView {
-  const reasoningLevels = resolveReasoningLevelsFromPiModel(model);
+  const contextWindow =
+    typeof model.contextWindow === "number" &&
+    Number.isFinite(model.contextWindow) &&
+    model.contextWindow > 0
+      ? Math.trunc(model.contextWindow)
+      : DEFAULT_PI_CONTEXT_WINDOW;
+  const maxOutputTokens =
+    typeof model.maxTokens === "number" && Number.isFinite(model.maxTokens) && model.maxTokens > 0
+      ? Math.trunc(model.maxTokens)
+      : DEFAULT_PI_MAX_OUTPUT_TOKENS;
+  const reasoningSpec = resolveReasoningSpecFromPiModel(model, apiType);
   const config: ModelConfigObject = {
+    enabled: true,
     properties: {
-      supportsToolCall: true,
-      ...(typeof model.contextWindow === "number" && model.contextWindow > 0
-        ? { contextWindow: model.contextWindow }
-        : {}),
+      requiresMfjsToolSchema: false,
+      contextWindow,
       inputFormat: {
+        supportsText: true,
         supportsImage: model.images === true,
+        supportsVideo: false,
+        supportsAudio: false,
+        supportsPdf: false,
+      },
+      outputFormat: {
+        supportsText: true,
+      },
+      supportsToolCall: true,
+      supportsJsonSchemaOutput: false,
+      supportsNativeWebSearch: false,
+      supportsMidConversationSystem: false,
+    },
+    optionSpecs: {
+      reasoningLevel: {
+        values: [...reasoningSpec.values],
+        map: reasoningSpec.map,
+      },
+      maxOutputTokens: {
+        max: maxOutputTokens,
+        map: "{}",
       },
     },
-    ...(reasoningLevels.length > 0 || (typeof model.maxTokens === "number" && model.maxTokens > 0)
-      ? {
-          optionSpecs: {
-            ...(reasoningLevels.length > 0 ? { reasoningLevel: { values: reasoningLevels } } : {}),
-            ...(typeof model.maxTokens === "number" && model.maxTokens > 0
-              ? { maxOutputTokens: { max: model.maxTokens } }
-              : {}),
-          },
-        }
-      : {}),
   };
   return {
     kind: "candidate",
@@ -422,7 +486,7 @@ export function projectPiCustomProviderToSettingsView(
     personalConfig: config,
     effectiveConfig: config,
     issues: [],
-    models: custom.models.map(projectPiCustomModelToSettingsView),
+    models: custom.models.map((model) => projectPiCustomModelToSettingsView(model, apiType)),
   };
 }
 
@@ -433,17 +497,21 @@ export function convertZCodeModelConfigToPiModelEntry(
   existing?: PiCustomModelEntry | undefined,
 ): PiCustomModelEntry {
   const reasoningValues = config?.optionSpecs?.reasoningLevel?.values;
+  const reasoningMap = config?.optionSpecs?.reasoningLevel?.map ?? undefined;
   const hasReasoningSpec = Array.isArray(reasoningValues);
   const hasReasoning = hasReasoningSpec
-    ? reasoningValues.some((v) => v !== "off")
+    ? reasoningValues.some((v) => !isOffThinkingLevel(v))
     : (existing?.reasoning ?? false);
   const thinkingLevelMap = hasReasoningSpec
-    ? buildThinkingLevelMapFromZCodeLevels(reasoningValues)
+    ? hasReasoning
+      ? buildThinkingLevelMapFromZCodeLevels(reasoningValues, reasoningMap)
+      : null
     : (existing?.thinkingLevelMap ?? null);
   const supportsImage = config?.properties?.inputFormat?.supportsImage;
+  const preservedName = existing && existing.id === modelId ? (existing.name ?? modelId) : modelId;
   return {
     id: modelId,
-    name: existing?.name ?? modelId,
+    name: preservedName,
     reasoning: hasReasoning,
     images: typeof supportsImage === "boolean" ? supportsImage : (existing?.images ?? false),
     contextWindow: config?.properties?.contextWindow ?? existing?.contextWindow ?? null,
@@ -481,6 +549,43 @@ export function reorderPiCustomProvidersInText(
   return { changed: true, text: serializeModelsJson(root, originalText) };
 }
 
+export interface PiResolvedProviderConnectivityTarget {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly baseUrl: string | null;
+  readonly api: string;
+  readonly apiKey: string | null;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly authHeader?: boolean | undefined;
+  readonly keyProblem?: "missing-env" | "command-unsupported" | undefined;
+  readonly missingEnvName?: string | undefined;
+}
+
+function resolveRawHeaderMap(
+  raw: unknown,
+  envLookup: (name: string) => string | undefined,
+): Record<string, string> {
+  if (!isPlainRecord(raw)) return {};
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const headerName = key.trim();
+    if (!headerName || hasControlChars(headerName) || typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed || hasControlChars(trimmed)) continue;
+    const dollar = DOLLAR_ENV_RE.exec(trimmed);
+    if (dollar) {
+      const envName = (dollar[1] ?? dollar[2])!;
+      const resolved = envLookup(envName)?.trim();
+      if (resolved && !hasControlChars(resolved)) {
+        headers[headerName] = resolved;
+      }
+      continue;
+    }
+    headers[headerName] = trimmed;
+  }
+  return headers;
+}
+
 /**
  * 仅限主进程/Host 内部用于远程 `/models` 拉取时解析 `models.json` 中的真实密钥，
  * 绝不回传给渲染进程或写入日志。
@@ -509,6 +614,87 @@ export function resolvePiCustomProviderRawApiKeyFromText(
     if (resolved) return resolved;
   }
   return key;
+}
+
+/**
+ * 仅限主进程/Host 内部用于模型连通性测试时解析 `models.json` 中的目标连接配置与真实凭据，
+ * 绝不回传给渲染进程或写入日志。
+ */
+export function resolvePiProviderConnectivityTargetFromText(
+  text: string | null,
+  providerId: string,
+  modelId: string,
+  envLookup: (name: string) => string | undefined,
+): PiResolvedProviderConnectivityTarget | null {
+  const root = parseRootJson(text);
+  if (!root || !isPlainRecord(root["providers"])) return null;
+  const entry = root["providers"][providerId];
+  if (!isPlainRecord(entry)) return null;
+
+  const trimmedModelId = modelId.trim();
+  const rawModels = Array.isArray(entry["models"]) ? entry["models"] : [];
+  const matchedModel = rawModels.find(
+    (item): item is Record<string, unknown> =>
+      isPlainRecord(item) && nonEmptyStr(item["id"]) === trimmedModelId,
+  );
+
+  const rawBaseUrl = nonEmptyStr(entry["baseUrl"]);
+  const baseUrl = rawBaseUrl ? normalizePiBaseUrl(rawBaseUrl) : null;
+  const api =
+    nonEmptyStr(matchedModel?.["api"]) ?? nonEmptyStr(entry["api"]) ?? "openai-completions";
+  const headers: Record<string, string> = {
+    ...resolveRawHeaderMap(entry["headers"], envLookup),
+    ...resolveRawHeaderMap(matchedModel?.["headers"], envLookup),
+  };
+  const authHeader = typeof entry["authHeader"] === "boolean" ? entry["authHeader"] : undefined;
+
+  let apiKey: string | null = null;
+  let keyProblem: PiResolvedProviderConnectivityTarget["keyProblem"];
+  let missingEnvName: string | undefined;
+
+  const rawKey = entry["apiKey"];
+  if (typeof rawKey === "string" && rawKey.trim() !== "") {
+    const key = rawKey.trim();
+    if (key.startsWith("!")) {
+      keyProblem = "command-unsupported";
+    } else {
+      const dollar = DOLLAR_ENV_RE.exec(key);
+      if (dollar) {
+        const name = (dollar[1] ?? dollar[2])!;
+        const resolved = envLookup(name)?.trim();
+        if (resolved) {
+          apiKey = resolved;
+        } else {
+          keyProblem = "missing-env";
+          missingEnvName = name;
+        }
+      } else if (ENV_LIKE_RE.test(key)) {
+        const resolved = envLookup(key)?.trim();
+        if (resolved) {
+          apiKey = resolved;
+        } else if (key.includes("_")) {
+          keyProblem = "missing-env";
+          missingEnvName = key;
+        } else {
+          apiKey = key;
+        }
+      } else {
+        apiKey = key;
+      }
+    }
+  }
+
+  return {
+    providerId,
+    modelId: trimmedModelId,
+    baseUrl,
+    api,
+    apiKey,
+    headers,
+    ...(authHeader !== undefined ? { authHeader } : {}),
+    ...(keyProblem ? { keyProblem } : {}),
+    ...(missingEnvName ? { missingEnvName } : {}),
+  };
 }
 
 /**

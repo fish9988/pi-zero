@@ -1,4 +1,4 @@
-import type { SettingsSectionId } from "@/lib/settingsNavigation.js";
+import { isSettingsSectionEnabled, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 
 export interface SettingsSearchAvailability {
   desktop: boolean;
@@ -11,7 +11,7 @@ export interface SettingsSearchAvailability {
 }
 
 // 翻译 key 同时作为稳定定位 id；索引只描述入口，不持有任何配置值。
-export const SETTINGS_SEARCH_ITEMS = [
+const ALL_SETTINGS_SEARCH_ITEMS = [
   {
     id: "settings.taskAutoArchive",
     section: "archives",
@@ -319,6 +319,133 @@ export const SETTINGS_SEARCH_ITEMS = [
     description: "settings.browser.htmlClickOpensBrowserDescription",
     visibility: "desktop",
   },
+  // Pi 6 大核心设置分区检索索引
+  {
+    id: "settings.piRuntime.cliStatus",
+    section: "pi-runtime",
+    description: "settings.piRuntime.cliStatusDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piRuntime.agentDir",
+    section: "pi-runtime",
+    description: "settings.piRuntime.agentDirDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piRuntime.defaultShell",
+    section: "pi-runtime",
+    description: "settings.piRuntime.defaultShellDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piCredentials.oauthLogin",
+    section: "pi-credentials",
+    description: "settings.piCredentials.oauthLoginDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piCredentials.apiKeys",
+    section: "pi-credentials",
+    description: "settings.piCredentials.apiKeysDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piCredentials.envVars",
+    section: "pi-credentials",
+    description: "settings.piCredentials.envVarsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piContext.systemDocs",
+    section: "pi-context",
+    description: "settings.piContext.systemDocsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piContext.compaction",
+    section: "pi-context",
+    description: "settings.piContext.compactionDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piContext.queueMode",
+    section: "pi-context",
+    description: "settings.piContext.queueModeDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piContext.enabledModels",
+    section: "pi-context",
+    description: "settings.piContext.enabledModelsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piExtensions.subagent",
+    section: "pi-extensions",
+    description: "settings.piExtensions.subagentDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piExtensions.packages",
+    section: "pi-extensions",
+    description: "settings.piExtensions.packagesDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piExtensions.builtin",
+    section: "pi-extensions",
+    description: "settings.piExtensions.builtinDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piExtensions.skills",
+    section: "pi-extensions",
+    description: "settings.piExtensions.skillsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piExtensions.prompts",
+    section: "pi-extensions",
+    description: "settings.piExtensions.promptsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piMcpTools.mcpServers",
+    section: "pi-mcp-tools",
+    description: "settings.piMcpTools.mcpServersDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piMcpTools.builtinTools",
+    section: "pi-mcp-tools",
+    description: "settings.piMcpTools.builtinToolsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piMcpTools.codeMode",
+    section: "pi-mcp-tools",
+    description: "settings.piMcpTools.codeModeDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piKeybindingsNetwork.transport",
+    section: "pi-keybindings-network",
+    description: "settings.piKeybindingsNetwork.transportDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piKeybindingsNetwork.keybindings",
+    section: "pi-keybindings-network",
+    description: "settings.piKeybindingsNetwork.keybindingsDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.piKeybindingsNetwork.fileSearchExcludes",
+    section: "pi-keybindings-network",
+    description: "settings.piKeybindingsNetwork.fileSearchExcludesDescription",
+    visibility: "all",
+  },
 ] as const satisfies readonly {
   id: string;
   section: SettingsSectionId;
@@ -326,4 +453,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   visibility: "all" | keyof SettingsSearchAvailability;
 }[];
 
-export type SettingsSearchId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
+export type SettingsSearchId = (typeof ALL_SETTINGS_SEARCH_ITEMS)[number]["id"];
+
+export const SETTINGS_SEARCH_ITEMS = ALL_SETTINGS_SEARCH_ITEMS.filter((item) =>
+  isSettingsSectionEnabled(item.section),
+);

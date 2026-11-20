@@ -334,7 +334,12 @@ import {
   parseSelectionSideSlashCommand,
   type V4VisibleSlashCommand,
 } from "@/v4/slashCommands.js";
-import { parsePiLocalSlashCommand, PiConversationOverlays } from "@/pi-conversation/index.js";
+import {
+  executePiLocalSlashCommand,
+  parsePiLocalSlashCommand,
+  PiConversationOverlays,
+  subscribePiConversationAction,
+} from "@/pi-conversation/index.js";
 import { usePiSubagentPreferences } from "@/settings/pi/index.js";
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
@@ -671,6 +676,7 @@ export function SessionPane({
   compactForRemoteControl = false,
   provider,
   onSessionCreated,
+  onSessionDeleted,
   onSelectionSideChatUnavailable,
   focused = true,
   allowEscapeStopOutsidePane = false,
@@ -3104,34 +3110,86 @@ export function SessionPane({
     }
   }, [baseWorkspaceServices.piConfigService, locale, sessionId, workspacePath]);
 
-  const handlePiForkCurrent = useCallback(async () => {
-    const piService = baseWorkspaceServices.piConfigService;
-    if (!piService || !sessionId) {
-      toast(locale.startsWith("zh") ? "当前无活动会话可分叉" : "No active session to fork");
-      return;
-    }
-    try {
-      const res = await piService.runSessionAction({
-        op: "fork",
-        workspacePath,
-        sessionId,
-      });
-      if (res.op === "fork") {
+  const handlePiForkCurrent = useCallback(
+    async (mode: "fork" | "clone" = "fork") => {
+      const piService = baseWorkspaceServices.piConfigService;
+      if (!piService || !sessionId) {
         toast(
           locale.startsWith("zh")
-            ? `已分叉新会话：${res.result.title}`
-            : `Forked session: ${res.result.title}`,
+            ? mode === "clone"
+              ? "当前无活动会话可克隆"
+              : "当前无活动会话可分叉"
+            : mode === "clone"
+              ? "No active session to clone"
+              : "No active session to fork",
         );
-        onSessionCreated?.(res.result.sessionId);
+        return;
       }
-    } catch (error) {
-      toast(error instanceof Error ? error.message : String(error));
-    }
-  }, [baseWorkspaceServices.piConfigService, locale, onSessionCreated, sessionId, workspacePath]);
+      try {
+        const res = await piService.runSessionAction({
+          op: "fork",
+          workspacePath,
+          sessionId,
+        });
+        if (res.op === "fork") {
+          toast(
+            locale.startsWith("zh")
+              ? `${mode === "clone" ? "已克隆新会话" : "已分叉新会话"}：${res.result.title}`
+              : `${mode === "clone" ? "Cloned session" : "Forked session"}: ${res.result.title}`,
+          );
+          onSessionCreated?.(res.result.sessionId);
+        }
+      } catch (error) {
+        toast(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [baseWorkspaceServices.piConfigService, locale, onSessionCreated, sessionId, workspacePath],
+  );
 
   const handlePiRewound = useCallback(() => {
     void taskRestart.restart();
   }, [taskRestart.restart]);
+
+  const piSlashModelHandlersRef = useRef<{
+    selectModel: (providerId: string, modelId: string) => Promise<void>;
+    selectThought: (thought: string) => Promise<void>;
+    availableModels: ReadonlyArray<{ readonly providerId: string; readonly modelId: string }>;
+  }>({
+    selectModel: async () => undefined,
+    selectThought: async () => undefined,
+    availableModels: [],
+  });
+
+  useEffect(() => {
+    if (readOnly || focused === false) return;
+    return subscribePiConversationAction((detail) => {
+      if (detail.workspacePath && detail.workspacePath !== workspacePath) return;
+      if (detail.sessionId && sessionId && detail.sessionId !== sessionId) return;
+      if (detail.kind === "btw") {
+        handlePiBtwOpenChange(true);
+      } else if (detail.kind === "tree") {
+        if (!sessionId) {
+          toast(
+            locale.startsWith("zh")
+              ? "当前为草稿态，发送首条消息后即可查看分支树"
+              : "Send a message first to open the session branch tree",
+          );
+          return;
+        }
+        setPiTreeOpen(true);
+      } else if (detail.kind === "export") {
+        void handlePiExportHtml();
+      }
+    });
+  }, [
+    focused,
+    handlePiBtwOpenChange,
+    handlePiExportHtml,
+    locale,
+    readOnly,
+    sessionId,
+    workspacePath,
+  ]);
 
   // 严格只保留 Pi 原生支持的本地恢复命令 `/reload`，不再向 `/` 菜单注入非 Pi 命令（如 `/plan`、`/side`）。
   const appSlashCommands = useMemo<AppSlashCommand[] | undefined>(() => {
@@ -4040,31 +4098,39 @@ export function SessionPane({
         readyAttachments.length > 0 || contextAttachmentCount > 0,
       );
       if (piLocalSlash) {
-        if (piLocalSlash.kind === "btw") {
-          handlePiBtwOpenChange(true, piLocalSlash.question || undefined);
-          return "sent" as const;
-        }
-        if (piLocalSlash.kind === "export") {
-          void handlePiExportHtml();
-          return "sent" as const;
-        }
-        if (piLocalSlash.kind === "tree") {
-          if (sessionId) setPiTreeOpen(true);
-          return "sent" as const;
-        }
-        if (piLocalSlash.kind === "fork") {
-          void handlePiForkCurrent();
-          return "sent" as const;
-        }
-        if (piLocalSlash.kind === "settings") {
-          setPendingSettingsSectionIntent(piLocalSlash.section ?? "general");
-          openSettingsTab();
-          return "sent" as const;
-        }
-        if (piLocalSlash.kind === "reload") {
-          void taskRestart.restart();
-          return "sent" as const;
-        }
+        void executePiLocalSlashCommand({
+          dispatch: piLocalSlash,
+          isZh: locale.toLowerCase().startsWith("zh"),
+          sessionId,
+          workspacePath,
+          workspaceIdentity,
+          piConfigService: baseWorkspaceServices.piConfigService,
+          zcodeTaskService: baseWorkspaceServices.zcodeTaskService,
+          rows: snapshotRef.current?.rows.window,
+          currentModel: {
+            provider: draftConfigRef.current.provider ?? "",
+            model: draftConfigRef.current.model ?? "",
+          },
+          availableModels: piSlashModelHandlersRef.current.availableModels,
+          onOpenBtw: (question) => handlePiBtwOpenChange(true, question),
+          onExportHtml: handlePiExportHtml,
+          onOpenTree: () => setPiTreeOpen(true),
+          onForkOrClone: handlePiForkCurrent,
+          onOpenSettings: (section) => {
+            setPendingSettingsSectionIntent(section);
+            openSettingsTab();
+          },
+          onReload: taskRestart.restart,
+          onStartNewSession: () => onSessionDeleted?.(),
+          onOpenSession: (targetId) => onSessionCreated?.(targetId),
+          onSessionDeleted: () => onSessionDeleted?.(),
+          onSelectModel: (providerId, modelId) =>
+            piSlashModelHandlersRef.current.selectModel(providerId, modelId),
+          onSelectThought: (thought) => piSlashModelHandlersRef.current.selectThought(thought),
+          onOpenGitReview: onOpenGitReview ? () => onOpenGitReview() : undefined,
+          confirmDelete: (payload) => confirmLifecycleRecovery(payload),
+        });
+        return "sent" as const;
       }
 
       if (!draftProjectReady || !(await ensureDraftModelReadyForSend())) {
@@ -4339,7 +4405,14 @@ export function SessionPane({
       handlePiBtwOpenChange,
       handlePiExportHtml,
       handlePiForkCurrent,
+      locale,
+      onOpenGitReview,
+      onSessionCreated,
+      onSessionDeleted,
       openSettingsTab,
+      confirmLifecycleRecovery,
+      workspaceIdentity,
+      workspacePath,
       reportDraftCreated,
       handleOpenSelectionSideConversationWithPrompt,
       invalidateActiveHighspeedCard,
@@ -5212,6 +5285,18 @@ export function SessionPane({
     },
     [handleDraftSelectThought, handleSelectModel, sessionId],
   );
+
+  piSlashModelHandlersRef.current = {
+    selectModel: (providerId, modelId) => handleSelectModel(providerId, modelId, null),
+    selectThought: (thought) =>
+      handleSelectThought(thought, {
+        provider: draftConfigRef.current.provider ?? "",
+        model: draftConfigRef.current.model ?? "",
+      }),
+    availableModels: (modelSelectionDisplayView?.providers ?? []).flatMap((p) =>
+      p.models.map((m) => ({ providerId: p.providerId, modelId: m.modelId })),
+    ),
+  };
 
   const handleRecoverCustomModelSelection = useCallback(
     async (value: string, sourceModel: ModelSelectionSource | null) => {

@@ -13,6 +13,7 @@ export {
   prepareRemoteServerConnection,
 } from "#src/remote-projects/index.js";
 import {
+  createPiUnifiedProjectService,
   createProjectDataPort,
   createProjectService,
   createTaskAutoArchiveScheduler,
@@ -53,6 +54,7 @@ import {
   createPiAugmentedModelSelectionService,
   disposeAllPiProcesses,
   disposeAllPiProcessesAndWait,
+  normalizeWorkspacePathKey,
   resolvePiAgentDir,
 } from "#src/pi-runtime/index.js";
 import {
@@ -2397,7 +2399,7 @@ export function createLocalServices(options: {
     database: () => taskIndexRepo.getOrganizationDatabase(),
     afterChange: publishProjectChange,
   });
-  const projectService = createProjectService({
+  const baseProjectService = createProjectService({
     directories: {
       home: async () => (await systemService.info()).homedir,
       read: (params) => fileService.readdir(params),
@@ -2425,6 +2427,7 @@ export function createLocalServices(options: {
       }),
     },
   });
+  let projectService: IProjectService = baseProjectService;
   const taskGroupService = createTaskGroupService({
     database: () => taskIndexRepo.getOrganizationDatabase(),
     resolveTasks: async (refs) => {
@@ -2492,6 +2495,25 @@ export function createLocalServices(options: {
         catalog: piModelCatalog ?? undefined,
         prepareSessionCreation,
       });
+  const piUnifiedProject =
+    piAgentService && (!options?.projectStorageHostId || options.projectStorageHostId === "local")
+      ? createPiUnifiedProjectService({
+          base: baseProjectService,
+          repository: () => taskIndexRepo.getProjectRepository(),
+          taskStore: taskIndexRepo,
+          workspaceDirectory: join(projectDataRoot(), "workspace"),
+          piDiscovery: {
+            listAllSessions: () => piAgentService.listAllPiSessions?.() ?? Promise.resolve([]),
+            watchSessions: (onChange) =>
+              piAgentService.watchAllPiSessions?.(onChange) ?? (() => {}),
+            normalizePathKey: (rawPath) => normalizeWorkspacePathKey(rawPath),
+          },
+          onDidSync: () => broadcastService.send({ channel: "state:projects", payload: {} }),
+        })
+      : null;
+  if (piUnifiedProject) {
+    projectService = piUnifiedProject.service;
+  }
   const zcodeAgentService: IZCodeAgentService =
     piAgentService ??
     createZCodeAgentService({
@@ -3438,6 +3460,7 @@ export function createLocalServices(options: {
   providerRuntimes.set(services, providerRuntime);
   const augmentedSelection = effectiveModelSelection;
   piRuntimeDisposers.set(services, () => {
+    piUnifiedProject?.dispose();
     piConfigService.dispose();
     if ("dispose" in augmentedSelection && typeof augmentedSelection.dispose === "function") {
       augmentedSelection.dispose();

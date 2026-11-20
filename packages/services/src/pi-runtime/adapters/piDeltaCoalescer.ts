@@ -70,7 +70,7 @@ export class PiDeltaCoalescer {
         toSeq: commit.toSeq,
         deltas: [...commit.deltas],
       };
-    } else if (this.pending.toSeq + 1 === commit.fromSeq) {
+    } else if (this.pending.toSeq === commit.fromSeq) {
       const mergedDeltas = [...this.pending.deltas];
       mergeRowDeltas(mergedDeltas, commit.deltas);
       this.pending = {

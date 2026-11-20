@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import type { PiWorkspaceScopedSectionProps } from "./contract.js";
 import {
   PiCard,
@@ -32,6 +33,7 @@ type QueueDeliveryMode = "one-at-a-time" | "all";
 
 export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProps) {
   const { tr } = usePiText();
+  const confirmDialog = useConfirmDialog();
   const { service, getItem, setSetting, resetSetting } = usePiSettingsSnapshot(workspacePath);
   const [scope, setScope] = useState<PiConfigScope>("global");
   const [docKind, setDocKind] = useState<PiSystemDocKind>("AGENTS.md");
@@ -133,6 +135,50 @@ export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProp
     );
   };
 
+  const confirmDiscardIfDirty = async (): Promise<boolean> => {
+    if (!dirty) return true;
+    return confirmDialog({
+      title: tr(`放弃对 ${docKind} 的未保存修改？`, `Discard unsaved changes to ${docKind}?`),
+      description: tr(
+        "切换文档或作用域将丢失尚未保存的编辑内容。",
+        "Switching document or scope will discard your unsaved edits.",
+      ),
+      confirmLabel: tr("放弃修改", "Discard"),
+      cancelLabel: tr("继续编辑", "Keep editing"),
+      confirmVariant: "destructive",
+    });
+  };
+
+  const handleScopeSwitch = async (nextScope: PiConfigScope) => {
+    if (nextScope === scope) return;
+    if (!(await confirmDiscardIfDirty())) return;
+    setScope(nextScope);
+  };
+
+  const handleDocKindSwitch = async (nextKind: PiSystemDocKind) => {
+    if (nextKind === docKind) return;
+    if (!(await confirmDiscardIfDirty())) return;
+    setDocKind(nextKind);
+  };
+
+  const commitTokenSetting = (
+    input: HTMLInputElement,
+    key: "compaction.reserveTokens" | "compaction.keepRecentTokens",
+    currentValue: number,
+  ) => {
+    const raw = input.value.trim();
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n)) {
+      input.value = String(currentValue);
+      return;
+    }
+    const clamped = Math.max(1024, Math.round(n));
+    input.value = String(clamped);
+    if (clamped !== currentValue) {
+      void setSetting(key, clamped);
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="pi-context-section">
       {/* 1. 全局与项目指令文档 */}
@@ -142,7 +188,7 @@ export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProp
           actions={
             <PiScopeSwitch
               scope={scope}
-              onScopeChange={setScope}
+              onScopeChange={(next) => void handleScopeSwitch(next)}
               hasWorkspace={hasWorkspace}
               testId="pi-context-scope"
             />
@@ -154,7 +200,7 @@ export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProp
             <PiSegmented
               value={docKind}
               options={docOptions}
-              onChange={setDocKind}
+              onChange={(next) => void handleDocKindSwitch(next)}
               testId="pi-doc-kind"
             />
             {docPath ? (
@@ -235,15 +281,13 @@ export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProp
             control={
               <Input
                 type="number"
+                min={1024}
                 defaultValue={reserveTokens}
                 key={`reserve-${reserveTokens}`}
                 className="w-32 text-right font-mono tabular-nums"
-                onBlur={(e) => {
-                  const n = Number(e.currentTarget.value);
-                  if (Number.isFinite(n) && n >= 1024 && n !== reserveTokens) {
-                    void setSetting("compaction.reserveTokens", Math.round(n));
-                  }
-                }}
+                onBlur={(e) =>
+                  commitTokenSetting(e.currentTarget, "compaction.reserveTokens", reserveTokens)
+                }
                 data-testid="pi-compaction-reserve"
               />
             }
@@ -253,15 +297,17 @@ export function PiContextSection({ workspacePath }: PiWorkspaceScopedSectionProp
             control={
               <Input
                 type="number"
+                min={1024}
                 defaultValue={keepRecentTokens}
                 key={`keep-${keepRecentTokens}`}
                 className="w-32 text-right font-mono tabular-nums"
-                onBlur={(e) => {
-                  const n = Number(e.currentTarget.value);
-                  if (Number.isFinite(n) && n >= 1024 && n !== keepRecentTokens) {
-                    void setSetting("compaction.keepRecentTokens", Math.round(n));
-                  }
-                }}
+                onBlur={(e) =>
+                  commitTokenSetting(
+                    e.currentTarget,
+                    "compaction.keepRecentTokens",
+                    keepRecentTokens,
+                  )
+                }
                 data-testid="pi-compaction-keep-recent"
               />
             }

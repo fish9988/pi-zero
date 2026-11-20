@@ -553,7 +553,9 @@ export function AnimatedSidePanePanel({
     panelElementRef,
     hasRenderedSidePane && isVisible && hasActiveCodeViewerTab,
   );
-  const isWindowResizeSettling = useWindowResizeSettling(hasRenderedSidePane);
+  const isWindowResizeSettling = useWindowResizeSettling(
+    hasRenderedSidePane && isVisible && hasActiveCodeViewerTab,
+  );
   const panelLayout = resolveAnimatedSidePanePanelLayout({ mobileOverlay });
   const hasReviewTab = visibleTabs.some((tab) => tab.type === "git");
   const canOpenSelectionSideConversation = shouldOfferSelectionSideConversation({

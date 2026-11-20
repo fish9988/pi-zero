@@ -194,8 +194,8 @@ const enUS: Record<string, string> = {
     "Projects on this computer can be restored later from Removed projects on this page.",
   "projectManagement.confirm.restoreRemote":
     "To bring back a remote project later, add it again from its device.",
-  "projectManagement.confirm.data.option": "Also delete their ZCode data",
-  "projectManagement.confirm.data.optionOne": "Also delete its ZCode data",
+  "projectManagement.confirm.data.option": "Also delete their Pi Zero data",
+  "projectManagement.confirm.data.optionOne": "Also delete its Pi Zero data",
   "projectManagement.confirm.data.note":
     "Sessions, session files, checkpoints and memory of the {count} projects on this computer.",
   "projectManagement.confirm.data.noteOne":
@@ -277,8 +277,8 @@ const enUS: Record<string, string> = {
   "project.hasUnread": "Project has unread tasks",
   "project.projectOrder": "Project order",
   "project.taskOrder": "Task order",
-  "project.browseHint": "ZCode can read and edit these folders",
-  "project.connectAndBrowseHint": "Device status: {status}. ZCode connects first.",
+  "project.browseHint": "Pi Zero can read and edit these folders",
+  "project.connectAndBrowseHint": "Device status: {status}. Pi Zero connects first.",
   "project.selectHost": "Choose a remote connection",
   "project.back": "Back",
   "project.next": "Next",
@@ -291,7 +291,7 @@ const enUS: Record<string, string> = {
   "project.trustFolderTitle": "Trust this folder?",
   "project.trustFoldersTitle": "Trust these folders?",
   "project.trustFoldersDescription":
-    "ZCode can read and edit files in these folders and run commands within your current permission settings. Continue only if you trust every folder listed.",
+    "Pi Zero can read and edit files in these folders and run commands within your current permission settings. Continue only if you trust every folder listed.",
   "project.trustFoldersAndCreate": "Trust folders and create",
   "project.trustFoldersAndRestore": "Trust folders and restore",
   "project.existingOnDeviceHint": "Already have projects on this device?",
@@ -727,22 +727,22 @@ const enUS: Record<string, string> = {
   "plugin.discovery.skip": "Skip",
   "plugin.discovery.install": "Install",
   "plugin.discovery.enable": "Enable",
-  "startup.global.silent": "Starting ZCode",
+  "startup.global.silent": "Starting Pi Zero",
   "startup.global.upgrading": "Upgrading local data",
   "startup.global.initializing": "Initializing local data",
   "startup.global.waiting": "Waiting for database preparation",
   "startup.global.saving": "Saving updates",
   "startup.global.finishing": "Finishing startup",
   "startup.global.servicesFailed":
-    "Local data is ready, but app services failed to start. Copy the diagnostics, then exit and reopen ZCode.",
+    "Local data is ready, but app services failed to start. Copy the diagnostics, then exit and reopen Pi Zero.",
   "startup.global.starting": "Preparing local data",
   "startup.global.preparing_host_storage": "Preparing task index",
   "startup.global.preparing_session_storage": "Preparing chat history",
-  "startup.global.starting_services": "Starting ZCode",
+  "startup.global.starting_services": "Starting Pi Zero",
   "startup.global.ready": "Local data is ready",
   "startup.global.failed": "Startup preparation failed",
   "startup.global.help":
-    "ZCode will open when preparation finishes. Large histories may take longer. Please keep the app running.",
+    "Pi Zero will open when preparation finishes. Large histories may take longer. Please keep the app running.",
   "startup.global.diagnostic": "Diagnostic ID",
   "startup.global.copy": "Copy diagnostics",
   "startup.global.exportLogs": "Export logs",
@@ -3670,7 +3670,7 @@ const enUS: Record<string, string> = {
   "chat.previewCards.video": "Video",
   "chat.previewCards.audio": "Audio",
   "chat.previewCards.openExternal": "Open in browser",
-  "chat.message.link.openInZCode": "Open in ZCode",
+  "chat.message.link.openInZCode": "Open in Pi Zero",
   "chat.previewCards.previewInSidePane": "Preview",
   "chat.previewCards.openDefaultApp": "Open with default app",
   "chat.previewCards.openWith": "Open with",
@@ -4068,14 +4068,14 @@ const enUS: Record<string, string> = {
   "settings.usageTitle": "Usage stats",
   "settings.usageDescription":
     "Review rough activity and model usage aggregated from local sessions.",
-  "resourceManager.storage.summaryTotal": "Total used by ZCode",
+  "resourceManager.storage.summaryTotal": "Total used by Pi Zero",
   "resourceManager.storage.scanning": "Calculating…",
   "resourceManager.storage.lastScanned": "Last calculated {time}",
   "resourceManager.storage.idle": "Not calculated yet",
   "resourceManager.storage.failed": "Calculation failed",
   "resourceManager.storage.rescan": "Recalculate",
   "resourceManager.storage.disk": "Disk",
-  "resourceManager.storage.diskUsage": "ZCode uses {used}",
+  "resourceManager.storage.diskUsage": "Pi Zero uses {used}",
   "resourceManager.storage.diskFree": "{free} free of {total}",
   "resourceManager.storage.diskUnknown": "Disk capacity unavailable",
   "resourceManager.storage.roots": "Data directories",
@@ -8182,7 +8182,7 @@ const enUS: Record<string, string> = {
   "resourceManager.network.empty": "Waiting for new network requests…",
   "resourceManager.network.noMatches": "No matching requests",
   "resourceManager.storage": "Storage",
-  "resourceManager.appUsage": "ZCode",
+  "resourceManager.appUsage": "Pi Zero",
   "resourceManager.systemUsage": "System",
   "resourceManager.category.base": "Base services",
   "resourceManager.category.task": "Task processes",
@@ -9234,6 +9234,73 @@ const enUS: Record<string, string> = {
   "settings.piMcpTools.title": "MCP & Tools",
   "settings.piKeybindingsNetwork.title": "Keybindings & Network",
   "settings.usageAbout.title": "Usage & About",
+  "appHeader.copyPiResumeCommand": "Copy terminal resume command (pi --session)",
+  "appHeader.piBtw": "/btw Side Q&A",
+  "appHeader.piBranchTree": "Session branch tree (/tree)",
+  "appHeader.piExportHtml": "Export HTML (/export)",
+  "settings.piRuntime.cliStatus": "Pi CLI Runtime Status",
+  "settings.piRuntime.cliStatusDescription":
+    "Inspect local or bundled Pi CLI binary path, version, and runtime health.",
+  "settings.piRuntime.agentDir": "Pi Agent Directory (~/.pi/agent)",
+  "settings.piRuntime.agentDirDescription":
+    "Locate the shared ~/.pi/agent directory for settings, models, and sessions.",
+  "settings.piRuntime.defaultShell": "Pi Default Shell",
+  "settings.piRuntime.defaultShellDescription":
+    "Choose the default shell used when Pi runs terminal commands.",
+  "settings.piCredentials.oauthLogin": "Terminal OAuth Login (pi /login)",
+  "settings.piCredentials.oauthLoginDescription":
+    "Authenticate providers via pi /login in your terminal.",
+  "settings.piCredentials.apiKeys": "Provider API Keys (auth.json)",
+  "settings.piCredentials.apiKeysDescription":
+    "Configure write-only API keys for built-in Pi providers.",
+  "settings.piCredentials.envVars": "Environment Variables (~/.pi/agent/.env)",
+  "settings.piCredentials.envVarsDescription":
+    "Manage write-only secret variables stored in ~/.pi/agent/.env.",
+  "settings.piContext.systemDocs": "Instruction & System Prompt Files (AGENTS.md / SYSTEM.md)",
+  "settings.piContext.systemDocsDescription":
+    "Edit global and project AGENTS.md, SYSTEM.md, and APPEND_SYSTEM.md files.",
+  "settings.piContext.compaction": "Auto-Compaction (Compaction)",
+  "settings.piContext.compactionDescription":
+    "Configure automatic context compaction, reserveTokens, and keepRecentTokens.",
+  "settings.piContext.queueMode": "Busy Queue Delivery (steer / followUp)",
+  "settings.piContext.queueModeDescription":
+    "Choose one-at-a-time or all-at-once delivery for steering and follow-up queues.",
+  "settings.piContext.enabledModels": "Enabled Models Scope (enabledModels)",
+  "settings.piContext.enabledModelsDescription":
+    "Restrict allowed models and /scoped-models cycling list.",
+  "settings.piExtensions.subagent": "Pi Subagent Display & Interaction",
+  "settings.piExtensions.subagentDescription":
+    "Configure auto-open side pane, trace density, auto-collapse, and model/token metrics.",
+  "settings.piExtensions.packages": "Pi Package Manager (pi install)",
+  "settings.piExtensions.packagesDescription":
+    "Install, update, or remove npm, git, and local Pi packages.",
+  "settings.piExtensions.builtin": "Built-in Extensions (builtin:*) & Paths",
+  "settings.piExtensions.builtinDescription":
+    "Toggle built-in extensions (builtin:mcp, builtin:codemode) and custom extension paths.",
+  "settings.piExtensions.skills": "Skills Manager (skills/)",
+  "settings.piExtensions.skillsDescription":
+    "Import, toggle, or remove global and project Skill folders and /skill:name commands.",
+  "settings.piExtensions.prompts": "Prompt Templates (prompts/*.md)",
+  "settings.piExtensions.promptsDescription":
+    "Create, edit, and delete global or project Markdown prompt templates.",
+  "settings.piMcpTools.mcpServers": "MCP Servers (mcp.json)",
+  "settings.piMcpTools.mcpServersDescription":
+    "Configure stdio and HTTP MCP servers, exposure policies, and enablement.",
+  "settings.piMcpTools.builtinTools": "Pi Built-in Tools (defaultTools)",
+  "settings.piMcpTools.builtinToolsDescription":
+    "Enable or disable read, bash, powershell, edit, write, grep, and other Pi tools.",
+  "settings.piMcpTools.codeMode": "CodeMode Sandbox & Images",
+  "settings.piMcpTools.codeModeDescription":
+    "Adjust CodeMode orchestration mode, inlineBudget, and image auto-resize.",
+  "settings.piKeybindingsNetwork.transport": "Pi Transport, HTTP Proxy & Retry Policy",
+  "settings.piKeybindingsNetwork.transportDescription":
+    "Configure SSE/WebSocket transport, httpProxy, timeouts, and automatic retries.",
+  "settings.piKeybindingsNetwork.keybindings": "Pi Keybindings (keybindings.json) & Shortcuts",
+  "settings.piKeybindingsNetwork.keybindingsDescription":
+    "Customize Pi keybinding overrides and desktop workbench shortcuts.",
+  "settings.piKeybindingsNetwork.fileSearchExcludes": "Workspace File Search Excludes",
+  "settings.piKeybindingsNetwork.fileSearchExcludesDescription":
+    "Configure excluded directories and glob patterns for workspace file search.",
   ...requestSecurityMessagesEnUS,
 };
 

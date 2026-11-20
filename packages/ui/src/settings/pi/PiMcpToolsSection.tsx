@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import type { PiWorkspaceScopedSectionProps } from "./contract.js";
 import {
   PiCard,
@@ -105,6 +106,7 @@ function parseKvLines(raw: string): Record<string, string> {
 
 export function PiMcpToolsSection({ workspacePath }: PiWorkspaceScopedSectionProps) {
   const { tr } = usePiText();
+  const confirmDialog = useConfirmDialog();
   const { service, resources, loading, reload } = usePiResourcesSnapshot(workspacePath);
   const { getItem, setSetting, resetSetting } = usePiSettingsSnapshot(workspacePath);
   const [scope, setScope] = useState<PiConfigScope>("global");
@@ -186,6 +188,17 @@ export function PiMcpToolsSection({ workspacePath }: PiWorkspaceScopedSectionPro
   };
 
   const handleDeleteMcp = async (server: PiMcpServerItem) => {
+    const confirmed = await confirmDialog({
+      title: tr(`删除 MCP 服务器 ${server.name}？`, `Delete MCP server ${server.name}?`),
+      description: tr(
+        `将从 ${server.scope === "project" ? "项目 (.pi/mcp.json)" : "全局 (~/.pi/agent/mcp.json)"} 移除该配置。`,
+        `This removes the server from ${server.scope} mcp.json.`,
+      ),
+      confirmLabel: tr("删除", "Delete"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
     try {
       await service.mutateResource({
         op: "deleteMcpServer",
@@ -403,9 +416,16 @@ export function PiMcpToolsSection({ workspacePath }: PiWorkspaceScopedSectionPro
                 key={`budget-${inlineBudget}`}
                 className="w-28 text-right font-mono tabular-nums"
                 onBlur={(e) => {
-                  const n = Number(e.currentTarget.value);
-                  if (Number.isFinite(n) && n >= 256 && n !== inlineBudget) {
-                    void setSetting("codemode.inlineBudget", Math.round(n));
+                  const raw = e.currentTarget.value.trim();
+                  const n = Number(raw);
+                  if (!raw || !Number.isFinite(n)) {
+                    e.currentTarget.value = String(inlineBudget);
+                    return;
+                  }
+                  const clamped = Math.max(256, Math.round(n));
+                  e.currentTarget.value = String(clamped);
+                  if (clamped !== inlineBudget) {
+                    void setSetting("codemode.inlineBudget", clamped);
                   }
                 }}
                 data-testid="pi-codemode-budget"

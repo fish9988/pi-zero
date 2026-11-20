@@ -62,7 +62,11 @@ export function computePiContextBreakdown(
   let startIndex = 0;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const candidate = rows[i];
-    if (candidate?.kind === "timelineMarker" && candidate.marker.type === "compact") {
+    if (
+      candidate?.kind === "timelineMarker" &&
+      candidate.marker.type === "compact" &&
+      candidate.marker.status === "success"
+    ) {
       startIndex = i + 1;
       break;
     }

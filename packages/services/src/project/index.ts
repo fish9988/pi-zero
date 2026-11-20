@@ -23,6 +23,14 @@ export {
   createTaskAutoArchiveScheduler,
   shouldRescanTaskAutoArchive,
 } from "#src/project/autoArchiveScheduler.js";
+export {
+  createPiUnifiedProjectService,
+  type CreatePiUnifiedProjectServiceOptions,
+  type PiDiscoveredSessionItem,
+  type PiSessionDiscoverySource,
+  type PiTaskFactMirrorStore,
+  type PiUnifiedProjectServiceHandle,
+} from "#src/project/pi-session-project-unifier.js";
 export type {
   ProjectTree,
   ProjectTask,

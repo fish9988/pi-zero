@@ -510,5 +510,13 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
         managedRuntimeDir: options.managedRuntimeDir,
       });
     },
+
+    async listAllPiSessions() {
+      return hub.listAllPiSessions();
+    },
+
+    watchAllPiSessions(onChange) {
+      return hub.watchAllPiSessions(onChange);
+    },
   };
 }

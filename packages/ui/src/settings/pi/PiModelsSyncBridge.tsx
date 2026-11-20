@@ -14,7 +14,12 @@ import { useServices } from "@/hooks/useServices.js";
 import { useProviderSettingsServiceView } from "@/hooks/useProviderSettingsView.js";
 import { resolveProviderSettingsFormProviders } from "@/lib/providerSettingsFormProjection.js";
 import { PiCard, PiRow, PiSegmented, PiStatusPill } from "./PiPrimitives.js";
-import { usePiConfigService, usePiSettingsSnapshot, usePiText } from "./usePiConfig.js";
+import {
+  usePiChangeSubscription,
+  usePiConfigService,
+  usePiSettingsSnapshot,
+  usePiText,
+} from "./usePiConfig.js";
 
 const LEGACY_ZCODE_PROVIDER_IDS = new Set([
   "zcode",
@@ -101,6 +106,10 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
   useEffect(() => {
     void loadPiCustomCount();
   }, [loadPiCustomCount]);
+
+  usePiChangeSubscription(piService, ["models", "auth"], () => {
+    void loadPiCustomCount();
+  });
 
   const unsyncedDraftProviders = useMemo(
     () =>

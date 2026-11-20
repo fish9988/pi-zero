@@ -31,6 +31,7 @@ const sectionDragModifiers: Modifier[] = [({ transform }) => ({ ...transform, x:
 export function PurposeSections({
   projects,
   tasks,
+  showTasksSection = true,
   onAdd,
   onCreate,
   hasExpandedProjects,
@@ -39,6 +40,8 @@ export function PurposeSections({
 }: {
   projects: ReactNode;
   tasks: ReactNode;
+  /** 仅当存在未归类任务时展示独立「任务」分区，避免 Pi 会话已全部归属各自 cwd 项目后残留空分区噪音。 */
+  showTasksSection?: boolean;
   onAdd(): void;
   onCreate(): void;
   hasExpandedProjects: boolean;
@@ -48,6 +51,9 @@ export function PurposeSections({
   const { intl } = useZCodeIntl();
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
   const [preferences, setPreferences] = useState(readSidebarPurposeSectionPreferences);
+  const visibleSectionOrder = showTasksSection
+    ? preferences.sectionOrder
+    : preferences.sectionOrder.filter((id) => id === "projects");
   const update = (next: typeof preferences) => {
     setPreferences(next);
     persistSidebarPurposeSectionPreferences(next);
@@ -73,11 +79,11 @@ export function PurposeSections({
           });
       }}
     >
-      <SortableContext items={preferences.sectionOrder} strategy={verticalListSortingStrategy}>
+      <SortableContext items={visibleSectionOrder} strategy={verticalListSortingStrategy}>
         {/* 原因：auto 列被长标题的滚动副本撑宽，溢出检测反复增删副本导致整列闪动；
             单列使用 minmax(0, 1fr)，只由侧栏决定宽度，分页按钮才能稳定居中。 */}
         <div className="grid grid-cols-1 gap-3" data-purpose-section-list="true">
-          {preferences.sectionOrder.map((id) => {
+          {visibleSectionOrder.map((id) => {
             const isProject = id === "projects";
             const title = msg(isProject ? "projects" : "tasks");
             const section = (

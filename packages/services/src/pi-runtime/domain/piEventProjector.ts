@@ -214,7 +214,7 @@ export class PiEventProjector {
   }
 
   setModelCost(cost: PiModelCostRates | undefined): void {
-    if (cost) this.state.modelCost = cost;
+    this.state.modelCost = cost;
   }
 
   getRowsRange(

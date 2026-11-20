@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ZCodeSlashCommand } from "@zcode/shared";
-import { PI_NATIVE_SLASH_COMMANDS, type PiSlashCommandDef } from "@zcode/shared/pi-config";
+import {
+  PI_NATIVE_SLASH_COMMANDS,
+  PI_THINKING_LEVELS,
+  type PiSlashCommandDef,
+  type PiThinkingLevel,
+} from "@zcode/shared/pi-config";
+import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 
@@ -61,19 +67,33 @@ export function usePiSlashCommands(workspacePath: string | null | undefined): ZC
   return useMemo(() => liveDefs.map((def) => toZCodeSlashCommand(def, isZh)), [isZh, liveDefs]);
 }
 
+export type PiLocalSlashSettingsSection =
+  | "general"
+  | "modelProvider"
+  | "pi-credentials"
+  | "pi-context"
+  | "pi-mcp-tools"
+  | "pi-keybindings-network"
+  | "usage";
+
 export type PiLocalSlashDispatch =
   | { readonly kind: "btw"; readonly question: string }
   | { readonly kind: "export" }
   | { readonly kind: "tree" }
   | { readonly kind: "fork" }
+  | { readonly kind: "clone" }
+  | { readonly kind: "new" }
+  | { readonly kind: "name"; readonly title: string }
+  | { readonly kind: "model"; readonly target: string }
+  | { readonly kind: "thinking"; readonly level: string }
+  | { readonly kind: "resume"; readonly query: string }
+  | { readonly kind: "session" }
+  | { readonly kind: "copy" }
+  | { readonly kind: "git" }
+  | { readonly kind: "delete" }
   | {
       readonly kind: "settings";
-      readonly section?:
-        | "general"
-        | "pi-credentials"
-        | "pi-mcp-tools"
-        | "pi-keybindings-network"
-        | "usage";
+      readonly section?: PiLocalSlashSettingsSection;
     }
   | { readonly kind: "reload" };
 
@@ -99,6 +119,30 @@ export function parsePiLocalSlashCommand(
       return { kind: "tree" };
     case "fork":
       return { kind: "fork" };
+    case "clone":
+      return { kind: "clone" };
+    case "new":
+      return { kind: "new" };
+    case "name":
+    case "rename":
+      return { kind: "name", title: args };
+    case "model":
+      return { kind: "model", target: args };
+    case "thinking":
+    case "effort":
+      return { kind: "thinking", level: args };
+    case "scoped-models":
+      return { kind: "settings", section: "pi-context" };
+    case "resume":
+      return { kind: "resume", query: args };
+    case "session":
+      return { kind: "session" };
+    case "copy":
+      return { kind: "copy" };
+    case "git":
+      return { kind: "git" };
+    case "delete":
+      return { kind: "delete" };
     case "settings":
       return { kind: "settings", section: "general" };
     case "login":
@@ -116,4 +160,35 @@ export function parsePiLocalSlashCommand(
     default:
       return null;
   }
+}
+
+export function resolvePiThinkingLevelArg(raw: string): PiThinkingLevel | null {
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "max") return "xhigh";
+  return (PI_THINKING_LEVELS as readonly string[]).includes(normalized)
+    ? (normalized as PiThinkingLevel)
+    : null;
+}
+
+export function extractLastAssistantReplyFromRows(
+  rows: readonly ConversationRow[] | undefined,
+): string {
+  if (!rows || rows.length === 0) return "";
+  let lastTurnId: string | null = null;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row?.kind === "assistantText" && row.text.trim()) {
+      lastTurnId = row.turnId;
+      break;
+    }
+  }
+  if (!lastTurnId) return "";
+  return rows
+    .filter(
+      (row): row is Extract<ConversationRow, { kind: "assistantText" }> =>
+        row.kind === "assistantText" && row.turnId === lastTurnId && row.text.trim().length > 0,
+    )
+    .map((row) => row.text.trim())
+    .join("\n\n");
 }

@@ -237,7 +237,7 @@ export function PiUsageAboutSection({
                 }
               />
               <PiRow
-                label={tr("关于 ZCode Pi 工作台", "About ZCode Pi Workbench")}
+                label={tr("关于 Pi Zero", "About Pi Zero")}
                 hint={tr(
                   "纯本地 Electron 桌面工作台 · 基于原生 @earendil-works/pi-coding-agent",
                   "Pure local Electron desktop workbench powered by native @earendil-works/pi-coding-agent",
@@ -258,7 +258,7 @@ export function PiUsageAboutSection({
             </>
           ) : (
             <PiRow
-              label={tr("ZCode Pi 工作台", "ZCode Pi Workbench")}
+              label="Pi Zero"
               control={
                 <span className="font-mono text-ui-xs text-foreground-subtle">Pi v1.5.2+</span>
               }

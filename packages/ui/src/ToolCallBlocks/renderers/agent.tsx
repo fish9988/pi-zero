@@ -8,6 +8,7 @@ import {
 import { useCallback, useMemo, type ReactNode } from "react";
 import { MessageResponse } from "@/components/ai-elements/message.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { usePiSubagentPreferences } from "@/settings/pi/piSubagentPreferences.js";
 import { ToolSnapshotFieldNotice } from "@/ToolCallBlocks/ToolSnapshotFieldNotice.js";
 import { ToolLayout } from "../ToolLayout.js";
 import type { ToolCallBlockRenderContext } from "../shared.js";
@@ -203,8 +204,79 @@ function BackgroundAgentProcessSection({
   );
 }
 
+function formatSubagentTokenCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M tok`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k tok`;
+  return `${Math.round(value)} tok`;
+}
+
+function readSubagentMetricsLabel(
+  toolCall: ToolCallBlockRenderContext["toolCallNode"]["toolCall"],
+  childToolCount: number,
+): string | null {
+  const parts: string[] = [];
+  const raw =
+    typeof toolCall.raw === "object" && toolCall.raw !== null
+      ? (toolCall.raw as Record<string, unknown>)
+      : null;
+  const details =
+    raw && typeof raw.details === "object" && raw.details !== null
+      ? (raw.details as Record<string, unknown>)
+      : null;
+  const results = Array.isArray(details?.results) ? details.results : [];
+  const firstResult =
+    results.length > 0 && typeof results[0] === "object" && results[0] !== null
+      ? (results[0] as Record<string, unknown>)
+      : null;
+  const input =
+    typeof toolCall.input === "object" && toolCall.input !== null
+      ? (toolCall.input as Record<string, unknown>)
+      : null;
+
+  const model =
+    (typeof firstResult?.model === "string" && firstResult.model.trim()) ||
+    (typeof input?.model === "string" && input.model.trim()) ||
+    (typeof raw?.model === "string" && raw.model.trim()) ||
+    "";
+  if (model) {
+    const shortModel = model.includes("/") ? (model.split("/").pop() ?? model) : model;
+    parts.push(shortModel);
+  }
+
+  let totalTokens = 0;
+  let totalTurns = 0;
+  for (const entry of results) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const usage =
+      typeof (entry as Record<string, unknown>).usage === "object" &&
+      (entry as Record<string, unknown>).usage !== null
+        ? ((entry as Record<string, unknown>).usage as Record<string, unknown>)
+        : null;
+    if (!usage) continue;
+    const ctx =
+      typeof usage.contextTokens === "number"
+        ? usage.contextTokens
+        : typeof usage.totalTokens === "number"
+          ? usage.totalTokens
+          : 0;
+    if (Number.isFinite(ctx) && ctx > 0) totalTokens += ctx;
+    if (typeof usage.turns === "number" && Number.isFinite(usage.turns) && usage.turns > 0) {
+      totalTurns += usage.turns;
+    }
+  }
+  const tokenText = formatSubagentTokenCount(totalTokens);
+  if (tokenText) parts.push(tokenText);
+  if (totalTurns > 0) parts.push(`${totalTurns}t`);
+  if (parts.length === 0 && childToolCount > 0) {
+    parts.push(`${childToolCount} tools`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
   const { intl } = useZCodeIntl();
+  const subagentPrefs = usePiSubagentPreferences();
   const { toolCall, childToolCalls } = context.toolCallNode;
   const prompt = getAgentPrompt(toolCall);
   const fallbackLabel = formatAgentMessage(intl, "chat.toolCall.agent.fallback", "SubAgent");
@@ -231,10 +303,17 @@ export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
           : toolCall.status === "failed"
             ? "failed"
             : "pending";
+  const subagentMetricsLabel = useMemo(
+    () =>
+      subagentPrefs.showMetrics ? readSubagentMetricsLabel(toolCall, childToolCalls.length) : null,
+    [childToolCalls.length, subagentPrefs.showMetrics, toolCall],
+  );
   // 使用块级 flex，避免 kindDetail 行盒的基线留白使头像与名称高于描述。
   const agentNameDetail = (
     <span
       className="flex items-center gap-2"
+      data-subagent-density={subagentPrefs.displayDensity}
+      data-subagent-show-metrics={String(subagentPrefs.showMetrics)}
       style={{ color: identityColor ?? "var(--color-foreground)" }}
     >
       {context.showIcon !== false ? (
@@ -248,6 +327,14 @@ export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
         />
       ) : null}
       <AgentNameText name={agentName || fallbackLabel} />
+      {subagentMetricsLabel ? (
+        <span
+          data-testid="subagent-metrics-badge"
+          className="hidden shrink-0 rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs font-normal text-foreground-subtlest sm:inline-flex"
+        >
+          {subagentMetricsLabel}
+        </span>
+      ) : null}
     </span>
   );
   // Agent 父块的完成/进行中边界只由父 Agent tool 决定。
@@ -372,23 +459,37 @@ export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
     ],
   );
 
+  const hasInlineDetails = Boolean(
+    backgroundAgentInfo ||
+    prompt ||
+    activityThought ||
+    activityContent ||
+    childToolCalls.length > 0,
+  );
+  const canToggleInline =
+    !summaryAction && hasInlineDetails && subagentPrefs.displayDensity !== "compact";
+  const shouldAutoOpenInline =
+    canToggleInline &&
+    subagentPrefs.displayDensity === "detailed" &&
+    (isAgentVisuallyRunning || !subagentPrefs.autoCollapseOnComplete || faceStatus === "failed");
+
   return (
     <>
       <ToolLayout
         toolId={toolCall.toolId}
         icon={null}
         showIcon={false}
-        canToggle={false}
+        canToggle={canToggleInline}
         forceOpen={false}
+        autoOpen={shouldAutoOpenInline}
         summaryAction={summaryAction}
-        // 产品边界：Agent/Task 在父对话中只保留单行摘要；完整 child timeline 统一从
-        // 右侧 tab / 手机抽屉查看，因此这里既不自动展开，也不提供手动展开入口。
+        // 当存在右侧详情入口时保留单行摘要；无右侧入口且密度非 compact 时遵循 Pi Subagent 偏好。
         kindLabel={null}
         expandedKindLabel={null}
         kindDetail={agentNameDetail}
         expandedKindDetail={agentNameDetail}
         sourceLabel={sourceLabel}
-        autoCollapseOnComplete
+        autoCollapseOnComplete={subagentPrefs.autoCollapseOnComplete && faceStatus !== "failed"}
         prioritizePrimaryText
         primaryText={
           collapsedChildSummary ? (
@@ -401,7 +502,7 @@ export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
         }
         expandedPrimaryText={expandedPrimaryText}
         secondaryText={
-          collapsedChildSummary?.secondaryText ? (
+          subagentPrefs.displayDensity !== "compact" && collapsedChildSummary?.secondaryText ? (
             <span className="min-w-0 truncate text-foreground-subtlest">
               {collapsedChildSummary.secondaryText}
             </span>

@@ -1050,67 +1050,80 @@ export function ChatContextUsage({
                   </div>
                 </div>
               ) : null}
-              {renderableTaskUsage.cumulative ? (
+              {renderableTaskUsage.cumulative || renderableTaskUsage.cost ? (
                 <div className="border-t border-border pt-2.5 space-y-2">
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ui-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-foreground-subtle">{tr("累计输入", "Input")}</span>
-                      <span className="font-mono tabular-nums text-foreground">
-                        {formatContextUsageTokenCount(
-                          renderableTaskUsage.cumulative.inputTokens,
-                          locale,
-                        )}
-                      </span>
+                  {renderableTaskUsage.cumulative ? (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-ui-xs">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="truncate whitespace-nowrap text-foreground-subtle">
+                          {tr("累计输入", "Input")}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap font-mono tabular-nums text-foreground">
+                          {formatContextUsageTokenCount(
+                            renderableTaskUsage.cumulative.inputTokens,
+                            locale,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="truncate whitespace-nowrap text-foreground-subtle">
+                          {tr("累计输出", "Output")}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap font-mono tabular-nums text-foreground">
+                          {formatContextUsageTokenCount(
+                            renderableTaskUsage.cumulative.outputTokens,
+                            locale,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="truncate whitespace-nowrap text-foreground-subtle">
+                          {tr("缓存读取", "Cache read")}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap font-mono tabular-nums text-foreground">
+                          {formatContextUsageTokenCount(
+                            renderableTaskUsage.cumulative.cacheReadTokens,
+                            locale,
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="truncate whitespace-nowrap text-foreground-subtle">
+                          {tr("缓存写入", "Cache write")}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap font-mono tabular-nums text-foreground">
+                          {formatContextUsageTokenCount(
+                            renderableTaskUsage.cumulative.cacheWriteTokens,
+                            locale,
+                          )}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-foreground-subtle">{tr("累计输出", "Output")}</span>
-                      <span className="font-mono tabular-nums text-foreground">
-                        {formatContextUsageTokenCount(
-                          renderableTaskUsage.cumulative.outputTokens,
-                          locale,
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-foreground-subtle">{tr("缓存读取", "Cache read")}</span>
-                      <span className="font-mono tabular-nums text-foreground">
-                        {formatContextUsageTokenCount(
-                          renderableTaskUsage.cumulative.cacheReadTokens,
-                          locale,
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-foreground-subtle">
-                        {tr("缓存写入", "Cache write")}
-                      </span>
-                      <span className="font-mono tabular-nums text-foreground">
-                        {formatContextUsageTokenCount(
-                          renderableTaskUsage.cumulative.cacheWriteTokens,
-                          locale,
-                        )}
-                      </span>
-                    </div>
-                  </div>
+                  ) : null}
                   {renderableTaskUsage.cost ? (
-                    <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2 text-ui-sm">
-                      <span className="text-foreground-subtle">
+                    <div
+                      className={cn(
+                        "flex min-w-0 items-center justify-between gap-2 text-ui-sm",
+                        renderableTaskUsage.cumulative && "border-t border-border/60 pt-2",
+                      )}
+                    >
+                      <span className="min-w-0 truncate whitespace-nowrap text-foreground-subtle">
                         {tr("本会话花销", "Session cost")}
                       </span>
                       {renderableTaskUsage.cost.pricingKnown ? (
-                        <div className="flex items-center gap-1.5 font-mono tabular-nums">
+                        <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap font-mono tabular-nums">
                           {renderableTaskUsage.cost.cacheSavedUsd >= 0.0001 ? (
-                            <span className="rounded bg-success/10 px-1.5 py-0.5 text-[11px] text-success">
+                            <span className="whitespace-nowrap rounded bg-success/10 px-1.5 py-0.5 text-[11px] text-success">
                               {tr("省", "Saved")}{" "}
                               {formatContextCostUsd(renderableTaskUsage.cost.cacheSavedUsd)}
                             </span>
                           ) : null}
-                          <span className="font-medium text-foreground">
+                          <span className="whitespace-nowrap font-medium text-foreground">
                             {formatContextCostUsd(renderableTaskUsage.cost.totalUsd)}
                           </span>
                         </div>
                       ) : (
-                        <span className="text-ui-xs text-foreground-subtlest">
+                        <span className="shrink-0 whitespace-nowrap text-ui-xs text-foreground-subtlest">
                           {tr("models.json 未配定价", "No cost in models.json")}
                         </span>
                       )}

@@ -25,10 +25,11 @@ import type {
   BatchAddPersonalModelInput,
   IProviderSettingsService,
 } from "#src/model-provider/providerFacadeServices.js";
-import { parseConfiguredEnvKeys } from "../domain/piConfigHelpers.js";
+import { parseConfiguredEnvKeys, stripBom } from "../domain/piConfigHelpers.js";
 import {
   convertZCodeModelConfigToPiModelEntry,
   convertZCodeProviderViewToPiSaveInput,
+  mapPiApiToZCodeApiType,
   mapZCodeApiTypeToPiApi,
   normalizePiBaseUrl,
   parsePiCustomProviders,
@@ -37,22 +38,27 @@ import {
   reorderPiCustomProvidersInText,
   resolvePiCustomProviderRawApiKeyFromText,
   resolvePiKeyWriteInputFromUiValue,
+  resolvePiProviderConnectivityTargetFromText,
   type EnvVarSource,
 } from "../domain/piModelsJsonCodec.js";
 import { atomicWritePiFile, enqueuePiFileWrite, readPiTextIfExists } from "./piAtomicFile.js";
 import { removePiCustomProvider, savePiCustomProvider } from "./piAuthModelsStore.js";
+import { probePiProviderModelConnectivity } from "./piProviderConnectivityProbe.js";
 
 const logger = createServiceLogger("pi-synced-provider-settings");
 
 function parseDotEnvValuesForHostOnly(text: string | null): Record<string, string> {
   if (!text) return {};
   const map: Record<string, string> = {};
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (const rawLine of stripBom(text).split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq <= 0) continue;
-    const name = line.slice(0, eq).trim();
+    const name = line
+      .slice(0, eq)
+      .replace(/^export\s+/, "")
+      .trim();
     let val = line.slice(eq + 1).trim();
     if (
       (val.startsWith('"') && val.endsWith('"') && val.length >= 2) ||
@@ -153,6 +159,7 @@ export function createPiSyncedProviderSettingsService(input: {
   base: IProviderSettingsService;
   agentDir: string;
   env?: NodeJS.ProcessEnv | undefined;
+  fetchImpl?: typeof fetch | undefined;
   readProviderApiKey?:
     | ((providerId: string, credentialKey?: string) => Promise<string | null>)
     | undefined;
@@ -287,10 +294,12 @@ export function createPiSyncedProviderSettingsService(input: {
       if (!piCustom && (await hasProviderInBase(arg.providerId))) {
         return input.base.resolveModelConfig(arg);
       }
+      const apiType = mapPiApiToZCodeApiType(piCustom?.api);
       const existing = piCustom?.models.find((m) => m.id === arg.modelId);
-      const baseCfg = existing
-        ? projectPiCustomModelToSettingsView(existing).effectiveConfig
-        : ({ properties: { supportsToolCall: true } } as ModelConfigObject);
+      const baseCfg = projectPiCustomModelToSettingsView(
+        existing ?? { id: arg.modelId },
+        apiType,
+      ).effectiveConfig;
       const personal = "personalConfig" in arg ? arg.personalConfig : undefined;
       const effectiveConfig: ModelConfigObject = personal
         ? {
@@ -303,15 +312,35 @@ export function createPiSyncedProviderSettingsService(input: {
                 ...baseCfg.properties?.inputFormat,
                 ...personal.properties?.inputFormat,
               },
+              outputFormat: {
+                ...baseCfg.properties?.outputFormat,
+                ...personal.properties?.outputFormat,
+              },
             },
             optionSpecs: {
               ...baseCfg.optionSpecs,
               ...personal.optionSpecs,
+              ...(baseCfg.optionSpecs?.reasoningLevel || personal.optionSpecs?.reasoningLevel
+                ? {
+                    reasoningLevel: {
+                      ...baseCfg.optionSpecs?.reasoningLevel,
+                      ...personal.optionSpecs?.reasoningLevel,
+                    },
+                  }
+                : {}),
+              ...(baseCfg.optionSpecs?.maxOutputTokens || personal.optionSpecs?.maxOutputTokens
+                ? {
+                    maxOutputTokens: {
+                      ...baseCfg.optionSpecs?.maxOutputTokens,
+                      ...personal.optionSpecs?.maxOutputTokens,
+                    },
+                  }
+                : {}),
             },
           }
         : baseCfg;
       return {
-        inheritedConfig: {},
+        inheritedConfig: baseCfg,
         effectiveConfig,
         issues: [],
       };
@@ -366,7 +395,50 @@ export function createPiSyncedProviderSettingsService(input: {
       return emitMergedChange(nextBaseView);
     },
 
-    testModelConnectivity: (arg) => input.base.testModelConnectivity(arg),
+    async testModelConnectivity(arg) {
+      const [modelsText, envText] = await Promise.all([
+        readPiTextIfExists(modelsPath),
+        readPiTextIfExists(envPath),
+      ]);
+      const dotEnvValues = parseDotEnvValuesForHostOnly(envText);
+      const target = resolvePiProviderConnectivityTargetFromText(
+        modelsText,
+        arg.providerId,
+        arg.modelId,
+        (name) => processEnv[name] ?? dotEnvValues[name],
+      );
+      if (!target) {
+        return input.base.testModelConnectivity(arg);
+      }
+      if (!target.baseUrl) {
+        return {
+          success: false,
+          error: {
+            message: `Provider "${arg.providerId}" is missing a valid Base URL in models.json.`,
+          },
+        };
+      }
+      if (target.keyProblem === "missing-env") {
+        return {
+          success: false,
+          error: {
+            message: `Environment variable $${target.missingEnvName ?? "API_KEY"} is not configured.`,
+          },
+        };
+      }
+      if (target.keyProblem === "command-unsupported") {
+        return {
+          success: false,
+          error: {
+            message:
+              "Command-based API keys (!command) cannot be tested directly from Settings; verify in chat.",
+          },
+        };
+      }
+      return probePiProviderModelConnectivity(target, {
+        fetchImpl: input.fetchImpl,
+      });
+    },
 
     async savePersonalProviderOverlay(providerId, config, metadata) {
       if (await isInPiModelsJson(providerId)) {

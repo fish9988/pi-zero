@@ -49,6 +49,7 @@ export function ProjectSections({
       canToggleProjects={canToggleProjects}
       onToggleProjects={onToggleProjects}
       onCreate={onCreate}
+      showTasksSection={localTasks.length > 0}
       projects={
         <SortableProjects
           projects={projects.filter((project) => !project.pinned)}

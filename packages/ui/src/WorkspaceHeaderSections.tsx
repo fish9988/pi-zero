@@ -31,6 +31,7 @@ import { useGlobalTaskList } from "@/hooks/useGlobalTaskList.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
 import { TaskActionMenuContent } from "@/TaskActionMenuContent.js";
+import { dispatchPiConversationAction } from "@/pi-conversation/index.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -673,6 +674,21 @@ export function WorkspaceHeaderTitleSection({
                     taskSessionFile.path,
                   );
                 }}
+                onCopyPiResumeCommand={
+                  services.piConfigService
+                    ? () => {
+                        const rawPath = taskSessionFile.path?.trim();
+                        if (!rawPath) return;
+                        const quoted = /\s/.test(rawPath)
+                          ? `"${rawPath.replace(/"/g, '\\"')}"`
+                          : rawPath;
+                        void handleCopyText(
+                          intl.formatMessage({ id: "appHeader.copyPiResumeCommand" }),
+                          `pi --session ${quoted}`,
+                        );
+                      }
+                    : undefined
+                }
                 onCopyTaskLogPath={() => {
                   void handleCopyText(
                     intl.formatMessage({ id: "appHeader.copyLogPath" }),
@@ -685,8 +701,38 @@ export function WorkspaceHeaderTitleSection({
                     activeSessionId,
                   );
                 }}
+                onOpenPiBtw={
+                  services.piConfigService
+                    ? () =>
+                        dispatchPiConversationAction({
+                          kind: "btw",
+                          workspacePath: workspaceAbsPath,
+                          sessionId: activeSessionId,
+                        })
+                    : undefined
+                }
+                onOpenPiTree={
+                  services.piConfigService
+                    ? () =>
+                        dispatchPiConversationAction({
+                          kind: "tree",
+                          workspacePath: workspaceAbsPath,
+                          sessionId: activeSessionId,
+                        })
+                    : undefined
+                }
+                onExportPiHtml={
+                  services.piConfigService
+                    ? () =>
+                        dispatchPiConversationAction({
+                          kind: "export",
+                          workspacePath: workspaceAbsPath,
+                          sessionId: activeSessionId,
+                        })
+                    : undefined
+                }
                 onViewModelTrajectory={
-                  resolvedTaskActionTaskId
+                  !services.piConfigService && resolvedTaskActionTaskId
                     ? () => {
                         useModelTrajectoryStore.getState().requestOpen({
                           taskId: resolvedTaskActionTaskId,

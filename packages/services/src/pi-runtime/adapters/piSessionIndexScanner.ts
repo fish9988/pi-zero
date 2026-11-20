@@ -57,15 +57,20 @@ export function normalizeWorkspacePathKey(
 ): string {
   const trimmed = rawPath.trim();
   if (!trimmed) return "";
-  let resolved = path.resolve(trimmed);
-  try {
-    resolved = realpathSync(resolved);
-  } catch {
-    // 目录尚未存在时保持 path.resolve 结果。
+  const pathMod = platform === "win32" ? path.win32 : path.posix;
+  let resolved = pathMod.resolve(trimmed);
+  if (platform === process.platform) {
+    try {
+      resolved = realpathSync(resolved);
+    } catch {
+      // 目录尚未存在时保持 resolve 结果。
+    }
   }
-  const normalized = resolved.replace(/[\\/]+$/, (match) =>
-    match.length === resolved.length ? match : "",
-  );
+  const parsedRoot = pathMod.parse(resolved).root;
+  const normalized =
+    resolved === parsedRoot
+      ? resolved
+      : resolved.replace(/[\\/]+$/, (match) => (match.length === resolved.length ? match : ""));
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 

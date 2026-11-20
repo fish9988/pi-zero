@@ -88,6 +88,27 @@ export function PiKeybindingsNetworkSection({
     }
   };
 
+  const commitNumericSetting = (
+    input: HTMLInputElement,
+    key: string,
+    currentValue: number,
+    min: number,
+    max?: number,
+  ) => {
+    const raw = input.value.trim();
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n)) {
+      input.value = String(currentValue);
+      return;
+    }
+    const rounded = Math.round(n);
+    const clamped = Math.max(min, max !== undefined ? Math.min(max, rounded) : rounded);
+    input.value = String(clamped);
+    if (clamped !== currentValue) {
+      void setSetting(key, clamped);
+    }
+  };
+
   return (
     <div className="space-y-8" data-testid="pi-keybindings-network-section">
       {/* 1. Pi 网络、代理与重试策略 */}
@@ -135,15 +156,18 @@ export function PiKeybindingsNetworkSection({
             control={
               <Input
                 type="number"
+                min={1000}
                 defaultValue={httpIdleTimeoutMs}
                 key={`idle-${httpIdleTimeoutMs}`}
                 className="w-28 text-right font-mono tabular-nums"
-                onBlur={(e) => {
-                  const n = Number(e.currentTarget.value);
-                  if (Number.isFinite(n) && n >= 1000 && n !== httpIdleTimeoutMs) {
-                    void setSetting("httpIdleTimeoutMs", Math.round(n));
-                  }
-                }}
+                onBlur={(e) =>
+                  commitNumericSetting(
+                    e.currentTarget,
+                    "httpIdleTimeoutMs",
+                    httpIdleTimeoutMs,
+                    1000,
+                  )
+                }
               />
             }
           />
@@ -152,15 +176,18 @@ export function PiKeybindingsNetworkSection({
             control={
               <Input
                 type="number"
+                min={1000}
                 defaultValue={wsConnectTimeoutMs}
                 key={`ws-${wsConnectTimeoutMs}`}
                 className="w-28 text-right font-mono tabular-nums"
-                onBlur={(e) => {
-                  const n = Number(e.currentTarget.value);
-                  if (Number.isFinite(n) && n >= 1000 && n !== wsConnectTimeoutMs) {
-                    void setSetting("websocketConnectTimeoutMs", Math.round(n));
-                  }
-                }}
+                onBlur={(e) =>
+                  commitNumericSetting(
+                    e.currentTarget,
+                    "websocketConnectTimeoutMs",
+                    wsConnectTimeoutMs,
+                    1000,
+                  )
+                }
               />
             }
           />
@@ -180,42 +207,42 @@ export function PiKeybindingsNetworkSection({
               <div className="flex items-center gap-1.5">
                 <Input
                   type="number"
+                  min={0}
+                  max={20}
                   defaultValue={maxRetries}
                   key={`retries-${maxRetries}`}
                   className="w-16 text-right font-mono tabular-nums"
                   aria-label="Max retries"
-                  onBlur={(e) => {
-                    const n = Number(e.currentTarget.value);
-                    if (Number.isFinite(n) && n >= 0 && n <= 20 && n !== maxRetries) {
-                      void setSetting("retry.maxRetries", Math.round(n));
-                    }
-                  }}
+                  onBlur={(e) =>
+                    commitNumericSetting(e.currentTarget, "retry.maxRetries", maxRetries, 0, 20)
+                  }
                 />
                 <Input
                   type="number"
+                  min={100}
                   defaultValue={baseDelayMs}
                   key={`base-${baseDelayMs}`}
                   className="w-24 text-right font-mono tabular-nums"
                   aria-label="Base delay ms"
-                  onBlur={(e) => {
-                    const n = Number(e.currentTarget.value);
-                    if (Number.isFinite(n) && n >= 100 && n !== baseDelayMs) {
-                      void setSetting("retry.baseDelayMs", Math.round(n));
-                    }
-                  }}
+                  onBlur={(e) =>
+                    commitNumericSetting(e.currentTarget, "retry.baseDelayMs", baseDelayMs, 100)
+                  }
                 />
                 <Input
                   type="number"
+                  min={1000}
                   defaultValue={maxAgentDelayMs}
                   key={`maxdelay-${maxAgentDelayMs}`}
                   className="w-24 text-right font-mono tabular-nums"
                   aria-label="Max delay ms"
-                  onBlur={(e) => {
-                    const n = Number(e.currentTarget.value);
-                    if (Number.isFinite(n) && n >= 1000 && n !== maxAgentDelayMs) {
-                      void setSetting("retry.maxAgentDelayMs", Math.round(n));
-                    }
-                  }}
+                  onBlur={(e) =>
+                    commitNumericSetting(
+                      e.currentTarget,
+                      "retry.maxAgentDelayMs",
+                      maxAgentDelayMs,
+                      1000,
+                    )
+                  }
                 />
               </div>
             }

@@ -173,7 +173,7 @@ export const PI_NATIVE_SLASH_COMMANDS: readonly PiSlashCommandDef[] = [
   },
   {
     name: "hotkeys",
-    descriptionZh: "查看并编辑 ZCode 与 Pi 快捷键",
+    descriptionZh: "查看并编辑 Pi Zero 与 Pi 快捷键",
     descriptionEn: "Configure keyboard shortcuts",
     category: "config",
     source: "builtin",

@@ -1,4 +1,5 @@
 // import { GripHorizontal, GripVertical } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/components/lib/utils.js";
 import {
   Group,
@@ -10,6 +11,27 @@ import {
   type PanelProps,
   type SeparatorProps,
 } from "react-resizable-panels";
+
+let activeSidePaneResizeCount = 0;
+
+/**
+ * 引用计数管理 `document.documentElement.dataset.sidePaneResizing`：
+ * 允许手柄拖拽与侧栏开合宽度动画重叠而不互相提前清除标志，返回一个幂等的释放函数。
+ */
+export function acquireSidePaneResizingFlag(): () => void {
+  if (typeof document === "undefined") return () => {};
+  let released = false;
+  activeSidePaneResizeCount += 1;
+  document.documentElement.dataset.sidePaneResizing = "true";
+  return () => {
+    if (released) return;
+    released = true;
+    activeSidePaneResizeCount = Math.max(0, activeSidePaneResizeCount - 1);
+    if (activeSidePaneResizeCount === 0) {
+      delete document.documentElement.dataset.sidePaneResizing;
+    }
+  };
+}
 
 export const WORKSPACE_VERTICAL_RESIZE_HANDLE_CLASS_NAME = cn(
   "aria-[orientation=vertical]:w-1 aria-[orientation=vertical]:translate-x-0 aria-[orientation=vertical]:my-0 aria-[orientation=vertical]:h-full",
@@ -82,18 +104,35 @@ type ResizablePanelProps = PanelProps;
 /*  ResizableHandle                                                    */
 /* ------------------------------------------------------------------ */
 
-function ResizableHandle({ className, onPointerDown, ...props }: SeparatorProps) {
+function ResizableHandle({ className, disabled, onPointerDown, ...props }: SeparatorProps) {
+  const cleanupDragRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      cleanupDragRef.current?.();
+      cleanupDragRef.current = null;
+    };
+  }, []);
+
   const handlePointerDown: SeparatorProps["onPointerDown"] = (event) => {
     onPointerDown?.(event);
-    if (typeof document === "undefined" || typeof window === "undefined") return;
-    const root = document.documentElement;
-    root.dataset.sidePaneResizing = "true";
+    if (disabled || event.defaultPrevented || event.button !== 0) return;
+    if (typeof window === "undefined") return;
+    if (event.currentTarget.getAttribute("aria-orientation") !== "vertical") return;
+    if (event.currentTarget.getAttribute("aria-disabled") === "true") return;
+
+    cleanupDragRef.current?.();
+    const releaseFlag = acquireSidePaneResizingFlag();
     const clear = () => {
-      delete root.dataset.sidePaneResizing;
+      releaseFlag();
       window.removeEventListener("pointerup", clear, true);
       window.removeEventListener("pointercancel", clear, true);
       window.removeEventListener("blur", clear);
+      if (cleanupDragRef.current === clear) {
+        cleanupDragRef.current = null;
+      }
     };
+    cleanupDragRef.current = clear;
     window.addEventListener("pointerup", clear, true);
     window.addEventListener("pointercancel", clear, true);
     window.addEventListener("blur", clear);
@@ -101,6 +140,7 @@ function ResizableHandle({ className, onPointerDown, ...props }: SeparatorProps)
 
   return (
     <Separator
+      disabled={disabled}
       onPointerDown={handlePointerDown}
       // react-resizable-panels 的 Separator 不会暴露 data-orientation，
       // 实际输出的是 aria-orientation，而且方向和 PanelGroup 相反。

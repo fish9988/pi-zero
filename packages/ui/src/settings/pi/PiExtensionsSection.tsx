@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input.js";
 import { Switch } from "@/components/ui/switch.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useSelectDirectory } from "@/hooks/usePlatform.js";
 import type { PiWorkspaceScopedSectionProps } from "./contract.js";
 import {
@@ -46,6 +47,7 @@ const BUILTIN_EXT_LABELS: Record<PiBuiltinExtensionId, { zh: string; en: string 
 
 export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionProps) {
   const { tr } = usePiText();
+  const confirmDialog = useConfirmDialog();
   const selectDirectory = useSelectDirectory();
   const { service, resources, loading, reload } = usePiResourcesSnapshot(workspacePath);
   const { setSetting } = usePiSettingsSnapshot(workspacePath);
@@ -60,6 +62,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
     name: string;
     content: string;
     isEdit: boolean;
+    scope: PiConfigScope;
   } | null>(null);
 
   if (!service) return <PiServiceUnavailable />;
@@ -77,15 +80,20 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
     scope === "global" ? p.scope === "global" : true,
   );
 
-  const runPkgAction = async (action: "install" | "remove" | "update", source?: string | null) => {
+  const runPkgAction = async (
+    action: "install" | "remove" | "update",
+    source?: string | null,
+    targetScope: PiConfigScope = scope,
+  ) => {
+    const targetWorkspace = targetScope === "project" && workspacePath ? workspacePath : undefined;
     setPkgBusy(source ? `${action}:${source}` : action);
     try {
       const res = await service.mutateResource({
         op: "runPackageAction",
         action,
         source: source ?? null,
-        scope,
-        ...(scopedWorkspace ? { workspacePath: scopedWorkspace } : {}),
+        scope: targetScope,
+        ...(targetWorkspace ? { workspacePath: targetWorkspace } : {}),
       });
       if (res.op === "package") {
         setPkgOutput(res.result.output.trim());
@@ -102,6 +110,21 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
     } finally {
       setPkgBusy(null);
     }
+  };
+
+  const handleConfirmRemovePackage = async (pkg: PiPackageItem) => {
+    const confirmed = await confirmDialog({
+      title: tr(`卸载扩展包 ${pkg.source}？`, `Remove package ${pkg.source}?`),
+      description: tr(
+        `将从 ${pkg.scope === "project" ? "项目 (.pi)" : "全局 (~/.pi)"} 作用域移除该扩展包。`,
+        `This removes the package from ${pkg.scope} scope.`,
+      ),
+      confirmLabel: tr("卸载", "Remove"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
+    await runPkgAction("remove", pkg.source, pkg.scope);
   };
 
   const toggleBuiltin = async (id: PiBuiltinExtensionId, enabled: boolean) => {
@@ -145,8 +168,16 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
     }
   };
 
-  const removeCustomExtension = (target: string) =>
-    runSafe(async () => {
+  const removeCustomExtension = async (target: string) => {
+    const confirmed = await confirmDialog({
+      title: tr(`移除自定义扩展路径？`, `Remove custom extension path?`),
+      description: target,
+      confirmLabel: tr("移除", "Remove"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
+    await runSafe(async () => {
       const current = resources?.customExtensions ?? [];
       await service.mutateResource({
         op: "setCustomExtensions",
@@ -156,6 +187,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
       });
       await reload();
     });
+  };
 
   const handleImportSkill = async () => {
     const selectedDir = await selectDirectory();
@@ -174,13 +206,15 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
 
   const handleSavePrompt = async () => {
     if (!promptModal || !promptModal.name.trim()) return;
+    const targetScope = promptModal.scope;
+    const targetWorkspace = targetScope === "project" && workspacePath ? workspacePath : undefined;
     await runSafe(async () => {
       await service.mutateResource({
         op: "savePromptTemplate",
         name: promptModal.name.trim(),
         content: promptModal.content,
-        scope,
-        ...(scopedWorkspace ? { workspacePath: scopedWorkspace } : {}),
+        scope: targetScope,
+        ...(targetWorkspace ? { workspacePath: targetWorkspace } : {}),
       });
       setPromptModal(null);
       await reload();
@@ -188,8 +222,19 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
     });
   };
 
-  const handleDeletePrompt = (prompt: PiPromptTemplate) =>
-    runSafe(async () => {
+  const handleDeletePrompt = async (prompt: PiPromptTemplate) => {
+    const confirmed = await confirmDialog({
+      title: tr(`删除 Prompt 模板 /${prompt.name}？`, `Delete prompt template /${prompt.name}?`),
+      description: tr(
+        `将永久删除 ${prompt.scope === "project" ? "项目 (.pi)" : "全局 (~/.pi)"} 下的 ${prompt.fileName}。`,
+        `This deletes ${prompt.fileName} from ${prompt.scope} scope.`,
+      ),
+      confirmLabel: tr("删除", "Delete"),
+      cancelLabel: tr("取消", "Cancel"),
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) return;
+    await runSafe(async () => {
       await service.mutateResource({
         op: "deletePromptTemplate",
         fileName: prompt.fileName,
@@ -199,6 +244,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
       await reload();
       toast(tr(`已删除 ${prompt.name}`, `Deleted ${prompt.name}`));
     });
+  };
 
   return (
     <div className="space-y-6" data-testid="pi-extensions-section">
@@ -227,7 +273,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
         <PiSectionHeader
           title={tr("Pi Subagent 显示与互动效果", "Pi Subagent Display & Interaction")}
         />
-        <PiCard className="px-4 py-1" testId="pi-subagent-effects-card">
+        <PiCard testId="pi-subagent-effects-card">
           <PiRow
             label={tr("调用时自动打开右侧子代理窗口", "Auto-open subagent side pane")}
             hint={tr(
@@ -367,13 +413,14 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
                       {pkg.source}
                     </span>
                     <PiStatusPill tone="neutral">{pkg.kind}</PiStatusPill>
+                    <PiStatusPill tone="neutral">{pkg.scope}</PiStatusPill>
                   </div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     disabled={pkgBusy !== null}
-                    onClick={() => void runPkgAction("remove", pkg.source)}
+                    onClick={() => void handleConfirmRemovePackage(pkg)}
                     data-testid={`pi-pkg-remove-${pkg.source}`}
                   >
                     <Trash2 className="size-3.5 text-destructive" />
@@ -538,20 +585,33 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
                         size="icon-sm"
                         aria-label={`Delete ${skill.name}`}
                         onClick={() =>
-                          void runSafe(async () => {
-                            await service.mutateResource({
-                              op: "deleteSkillFolder",
-                              folderPath: skill.folderPath,
-                              scope: skill.scope,
-                              ...(skill.scope === "project" && workspacePath
-                                ? { workspacePath }
-                                : {}),
+                          void (async () => {
+                            const confirmed = await confirmDialog({
+                              title: tr(
+                                `将 Skill「${skill.name}」移入回收站？`,
+                                `Move skill "${skill.name}" to trash?`,
+                              ),
+                              description: skill.folderPath,
+                              confirmLabel: tr("移入回收站", "Move to trash"),
+                              cancelLabel: tr("取消", "Cancel"),
+                              confirmVariant: "destructive",
                             });
-                            toast(
-                              tr(`已将 ${skill.name} 移入回收站`, `Moved ${skill.name} to trash`),
-                            );
-                            await reload();
-                          })
+                            if (!confirmed) return;
+                            await runSafe(async () => {
+                              await service.mutateResource({
+                                op: "deleteSkillFolder",
+                                folderPath: skill.folderPath,
+                                scope: skill.scope,
+                                ...(skill.scope === "project" && workspacePath
+                                  ? { workspacePath }
+                                  : {}),
+                              });
+                              toast(
+                                tr(`已将 ${skill.name} 移入回收站`, `Moved ${skill.name} to trash`),
+                              );
+                              await reload();
+                            });
+                          })()
                         }
                       >
                         <Trash2 className="size-3.5 text-destructive" />
@@ -575,7 +635,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setPromptModal({ name: "", content: "", isEdit: false })}
+              onClick={() => setPromptModal({ name: "", content: "", isEdit: false, scope })}
               data-testid="pi-prompt-add-btn"
             >
               <Plus className="size-3.5" />
@@ -592,7 +652,12 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
             visiblePrompts.map((prompt) => (
               <PiRow
                 key={`${prompt.scope}:${prompt.fileName}`}
-                label={<span className="font-mono">/{prompt.name}</span>}
+                label={
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono">/{prompt.name}</span>
+                    <PiStatusPill tone="neutral">{prompt.scope}</PiStatusPill>
+                  </span>
+                }
                 hint={prompt.description || prompt.fileName}
                 control={
                   <div className="flex items-center gap-1.5">
@@ -605,6 +670,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
                           name: prompt.name,
                           content: prompt.content ?? "",
                           isEdit: true,
+                          scope: prompt.scope,
                         })
                       }
                     >

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PiBtwResult } from "@zcode/shared/pi-config";
 import { Check, Copy, LoaderCircle, MessageSquareQuote, Send, X } from "lucide-react";
+import { MessageResponse } from "@/components/ai-elements/message.js";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { toast } from "@/components/ui/toast.js";
@@ -61,13 +62,22 @@ export function PiBtwPopover({
     [piService, sessionId, workspacePath],
   );
 
+  const runQuestionRef = useRef(runQuestion);
+  runQuestionRef.current = runQuestion;
+  const lastAutoRunQuestionRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!open) return;
-    if (initialQuestion?.trim()) {
-      setQuestion(initialQuestion.trim());
-      void runQuestion(initialQuestion.trim());
+    if (!open) {
+      lastAutoRunQuestionRef.current = null;
+      return;
     }
-  }, [initialQuestion, open, runQuestion]);
+    const trimmed = initialQuestion?.trim();
+    if (trimmed && lastAutoRunQuestionRef.current !== trimmed) {
+      lastAutoRunQuestionRef.current = trimmed;
+      setQuestion(trimmed);
+      void runQuestionRef.current(trimmed);
+    }
+  }, [initialQuestion, open]);
 
   if (!open) return null;
 
@@ -161,8 +171,13 @@ export function PiBtwPopover({
             </p>
           ) : (
             <>
-              <div className="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-ui-base leading-relaxed text-foreground">
-                {result.answer}
+              <div className="max-h-60 overflow-y-auto text-ui-base leading-relaxed text-foreground">
+                <MessageResponse
+                  className="min-w-0 break-words text-ui-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                  workspacePath={workspacePath}
+                >
+                  {result.answer}
+                </MessageResponse>
               </div>
               <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-ui-xs text-foreground-subtle">
                 <span className="font-mono tabular-nums">

@@ -141,13 +141,17 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
   let lastPhase: SessionPhase = "completedSuccess";
 
   const updateContextWindowForModel = (provider: string, modelId: string): void => {
-    const matched = catalogModels.find((m) => m.provider === provider && m.id === modelId);
+    const matched =
+      catalogModels.find((m) => m.provider === provider && m.id === modelId) ??
+      (input.defaultModel &&
+      input.defaultModel.provider === provider &&
+      input.defaultModel.id === modelId
+        ? input.defaultModel
+        : undefined);
     if (matched?.contextWindow && matched.contextWindow > 0) {
       contextWindowMax = matched.contextWindow;
     }
-    if (matched?.cost) {
-      activeModelCost = matched.cost;
-    }
+    activeModelCost = matched?.cost;
   };
 
   const settleOpenTurnHeader = (): void => {
@@ -266,7 +270,10 @@ export function hydratePiJsonlSession(input: HydratePiJsonlSessionInput): Hydrat
     if (entryType === "usage") {
       const entryUsage = readPiUsageRecord(entry["usage"]);
       if (entryUsage) {
-        usage = accumulateSessionUsage(usage, entryUsage, contextWindowMax).nextUsage;
+        usage = accumulateSessionUsage(usage, entryUsage, contextWindowMax, {
+          rows,
+          modelPricing: activeModelCost,
+        }).nextUsage;
       }
       continue;
     }

@@ -178,6 +178,20 @@ export interface PiAgentServiceOptions {
   readonly prepareSessionCreation?: PiPrepareSessionCreation | undefined;
 }
 
+export interface PiDiscoveredSessionRecord {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly normalizedCwd: string;
+  readonly file?: string | undefined;
+  readonly title: string;
+  readonly titleSource: "custom" | "default";
+  readonly createdAt: number;
+  readonly lastActivityAt: number;
+  readonly lastOutcome?: "completed" | "interrupted" | "error" | undefined;
+  readonly parentSessionId?: string | undefined;
+  readonly live: boolean;
+}
+
 export type PiAgentService = IZCodeAgentService & {
   disposeAllAndWait(): Promise<void>;
   /** 内部协作辅助：获取会话当前绑定的 `.jsonl` 路径（若存在）。 */
@@ -186,4 +200,8 @@ export type PiAgentService = IZCodeAgentService & {
   reloadSessionAfterRewind?(workspacePath: string, sessionId: string): Promise<void>;
   /** 内部协作辅助：向活跃或临时 Pi 进程拉取动态 `get_commands` 列表。 */
   listDynamicCommands?(workspacePath?: string): Promise<PiCommandInfo[]>;
+  /** 内部协作辅助：扫描全部磁盘 `~/.pi/agent/sessions` 与内存活跃 Pi 会话，供项目/任务目录统一索引。 */
+  listAllPiSessions?(): Promise<readonly PiDiscoveredSessionRecord[]>;
+  /** 内部协作辅助：监听 `~/.pi/agent/sessions` 磁盘变更及内存 Pi 会话发布/删除，返回幂等清理函数。 */
+  watchAllPiSessions?(onChange: () => void): () => void;
 };

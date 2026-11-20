@@ -1285,7 +1285,16 @@ function ConversationTimelineImpl({
           scrollToBottom();
         return;
       }
-      if (nextWidth === stableContentWidthRef.current) return;
+      if (nextWidth === stableContentWidthRef.current) {
+        if (
+          viewportHeightChanged &&
+          followingRef.current &&
+          getActiveUserScrollIntent() !== "awayFromBottom"
+        ) {
+          scrollToBottom();
+        }
+        return;
+      }
 
       // 宽度变化会让虚拟行分批重新测高；逐行补偿或逐批追底都会
       // 连续改写 scrollTop。侧栏开合/拖拽期间跳过逐帧 flushSync，稳定后统一批量测高并贴底，
@@ -1316,7 +1325,7 @@ function ConversationTimelineImpl({
         // 宽度校正期间禁用测高补偿；发布既有生命周期的结束，使待定位搜索此时接管。
         // 否则过早居中后，新挂载的上方缓冲行会把命中推离视口。
         commitMeasuredLayout((revision) => revision + 1);
-        if (followingRef.current) {
+        if (followingRef.current && getActiveUserScrollIntent() !== "awayFromBottom") {
           scrollToBottom();
         }
       }, CONTENT_WIDTH_RESIZE_SETTLE_MS);

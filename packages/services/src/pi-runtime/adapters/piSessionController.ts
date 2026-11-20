@@ -166,6 +166,7 @@ export class PiSessionController {
     snapshot: import("@zcode/shared/zcode-protocol-v4").ConversationSnapshot,
     rows: readonly import("@zcode/shared/zcode-protocol-v4").WireConversationRow[],
   ): void {
+    this.deltaCoalescer.dispose();
     this.lastActivityAt = Date.now();
     this.projector.replaceWithVirtualSnapshot(snapshot, rows);
     for (const sub of this.subscriptions.values()) this.emitSnapshotToSubscription(sub, "recovery");
@@ -175,6 +176,7 @@ export class PiSessionController {
     await this.ensureClient();
   }
   reloadFromHydratedDisk(filePath: string, hydrated: HydratedPiSessionResult): void {
+    this.deltaCoalescer.dispose();
     this.piSessionFile = filePath;
     this.lastActivityAt = hydrated.lastActivityAt;
     this.publishedToIndex = true;
@@ -411,6 +413,7 @@ export class PiSessionController {
       }
     }
     if (!rewoundFromDisk) {
+      this.deltaCoalescer.dispose();
       this.projector.rewindInMemoryBeforeRow(payload.target.rowId, `pi-${randomUUID()}`);
       for (const sub of this.subscriptions.values())
         this.emitSnapshotToSubscription(sub, "recovery");
