@@ -16,6 +16,22 @@ import { resolveProviderSettingsFormProviders } from "@/lib/providerSettingsForm
 import { PiCard, PiRow, PiSegmented, PiStatusPill } from "./PiPrimitives.js";
 import { usePiConfigService, usePiSettingsSnapshot, usePiText } from "./usePiConfig.js";
 
+const LEGACY_ZCODE_PROVIDER_IDS = new Set([
+  "zcode",
+  "zcode-start",
+  "zcode-coding-plan",
+  "bigmodel-coding-plan",
+  "bigmodel-team-coding-plan",
+  "bigmodel-start-plan",
+  "zai-coding-plan",
+  "zai-team-coding-plan",
+  "zai-start-plan",
+]);
+
+function isLegacyZCodeProviderId(providerId: string | null | undefined): boolean {
+  return Boolean(providerId && LEGACY_ZCODE_PROVIDER_IDS.has(providerId.trim().toLowerCase()));
+}
+
 function mapApiTypeToPiApi(apiType: string | null | undefined): string {
   switch (apiType) {
     case "anthropic":
@@ -83,10 +99,35 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
   const customProvidersToSync = useMemo(
     () =>
       formProviders.filter(
-        (provider) => provider.hasPersonalConfig && Boolean(provider.config.api?.baseUrl?.trim()),
+        (provider) =>
+          provider.hasPersonalConfig &&
+          !isLegacyZCodeProviderId(provider.providerId) &&
+          provider.config.access?.type !== "zhipu-account" &&
+          Boolean(provider.config.api?.baseUrl?.trim()),
       ),
     [formProviders],
   );
+  const currentThinking = (snapshot?.modelDefaults.thinkingLevel ?? "medium") as PiThinkingLevel;
+  const hasLegacyDefaultProvider = isLegacyZCodeProviderId(snapshot?.modelDefaults.provider);
+  const handleResetLegacyDefaultModel = useCallback(async () => {
+    if (!piService) return;
+    try {
+      await piService.mutateSettings({
+        op: "setModelDefaults",
+        model: null,
+        thinkingLevel: currentThinking,
+        ...(workspacePath ? { workspacePath } : {}),
+      });
+      toast(
+        tr(
+          "已清除失效的旧版 ZCode 默认提供商，恢复为自动选择可用 Pi 模型",
+          "Cleared legacy ZCode default provider and restored auto selection",
+        ),
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err));
+    }
+  }, [currentThinking, piService, tr, workspacePath]);
 
   const syncAllToPiModelsJson = useCallback(async () => {
     if (!piService) return;
@@ -142,7 +183,6 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
 
   if (!piService) return null;
 
-  const currentThinking = (snapshot?.modelDefaults.thinkingLevel ?? "medium") as PiThinkingLevel;
   const thinkingOptions = PI_THINKING_LEVELS.map((level) => ({
     value: level,
     label: level,
@@ -160,6 +200,29 @@ export function PiModelsSyncBridge({ workspacePath }: { workspacePath?: string |
 
   return (
     <PiCard testId="pi-models-sync-card">
+      {hasLegacyDefaultProvider ? (
+        <PiRow
+          label={tr(
+            "检测到已失效的旧版 ZCode 默认提供商",
+            "Legacy ZCode default provider detected",
+          )}
+          hint={tr(
+            `当前默认指向 ${snapshot?.modelDefaults.provider ?? ""}，Pi Zero 已移除旧版 ZCode 商业订阅通道，建议重置为自动选择。`,
+            `Current default points to ${snapshot?.modelDefaults.provider ?? ""}, which is no longer active in Pi Zero.`,
+          )}
+          control={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="pi-reset-legacy-default-provider"
+              onClick={() => void handleResetLegacyDefaultModel()}
+            >
+              {tr("重置为自动", "Reset to Auto")}
+            </Button>
+          }
+        />
+      ) : null}
       <PiRow
         label={tr("Pi 默认思考强度 (settings.json)", "Pi Default Thinking Level (settings.json)")}
         hint={

@@ -26,10 +26,16 @@ import {
   PiRow,
   PiScopeSwitch,
   PiSectionHeader,
+  PiSegmented,
   PiServiceUnavailable,
   PiStatusPill,
 } from "./PiPrimitives.js";
 import { usePiResourcesSnapshot, usePiSettingsSnapshot, usePiText } from "./usePiConfig.js";
+import {
+  updatePiSubagentPreferences,
+  usePiSubagentPreferences,
+  type PiSubagentDisplayDensity,
+} from "./piSubagentPreferences.js";
 
 const BUILTIN_EXT_LABELS: Record<PiBuiltinExtensionId, { zh: string; en: string }> = {
   "builtin:mcp": { zh: "MCP 客户端与工具桥接", en: "MCP client & tool bridge" },
@@ -43,6 +49,7 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
   const selectDirectory = useSelectDirectory();
   const { service, resources, loading, reload } = usePiResourcesSnapshot(workspacePath);
   const { setSetting } = usePiSettingsSnapshot(workspacePath);
+  const subagentPrefs = usePiSubagentPreferences();
 
   const [scope, setScope] = useState<PiConfigScope>("global");
   const [pkgInput, setPkgInput] = useState("");
@@ -213,6 +220,80 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
           <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
           {tr("刷新", "Refresh")}
         </Button>
+      </div>
+
+      {/* 0. Pi Subagent 独立窗口与交互效果设置 */}
+      <div className="space-y-3">
+        <PiSectionHeader
+          title={tr("Pi Subagent 显示与互动效果", "Pi Subagent Display & Interaction")}
+        />
+        <PiCard className="px-4 py-1" testId="pi-subagent-effects-card">
+          <PiRow
+            label={tr("调用时自动打开右侧子代理窗口", "Auto-open subagent side pane")}
+            hint={tr(
+              "当 Pi 派发 Subagent（单任务/并行/链式）时，自动在右侧工作台打开独立观测窗口，实时查看子代理思考与工具调用。",
+              "Automatically open the right-side subagent pane whenever Pi dispatches a subagent.",
+            )}
+            control={
+              <Switch
+                checked={subagentPrefs.autoOpenSidePane}
+                onCheckedChange={(checked) =>
+                  updatePiSubagentPreferences({ autoOpenSidePane: checked })
+                }
+                data-testid="pi-subagent-auto-open"
+              />
+            }
+          />
+          <PiRow
+            label={tr("子代理轨迹信息密度", "Subagent trace density")}
+            hint={tr(
+              "控制子代理摘要卡片与独立窗口中工具细节的展示粒度。",
+              "Control detail density for subagent cards and trace views.",
+            )}
+            control={
+              <PiSegmented<PiSubagentDisplayDensity>
+                value={subagentPrefs.displayDensity}
+                onChange={(displayDensity) => updatePiSubagentPreferences({ displayDensity })}
+                options={[
+                  { value: "compact", label: tr("紧凑", "Compact") },
+                  { value: "standard", label: tr("标准", "Standard") },
+                  { value: "detailed", label: tr("详细", "Detailed") },
+                ]}
+                testId="pi-subagent-density"
+              />
+            }
+          />
+          <PiRow
+            label={tr("完成后自动收起展开明细", "Auto-collapse when completed")}
+            hint={tr(
+              "子代理全部执行成功后自动折叠明细（出错时保持展开提醒）。",
+              "Automatically collapse details once all subagents finish successfully.",
+            )}
+            control={
+              <Switch
+                checked={subagentPrefs.autoCollapseOnComplete}
+                onCheckedChange={(checked) =>
+                  updatePiSubagentPreferences({ autoCollapseOnComplete: checked })
+                }
+                data-testid="pi-subagent-auto-collapse"
+              />
+            }
+          />
+          <PiRow
+            label={tr("显示模型与 Token 消耗", "Show model & token metrics")}
+            hint={tr(
+              "在子代理摘要与标题中透出所用模型与统计指标。",
+              "Display subagent model and token/turn metrics in summaries.",
+            )}
+            control={
+              <Switch
+                checked={subagentPrefs.showMetrics}
+                onCheckedChange={(checked) => updatePiSubagentPreferences({ showMetrics: checked })}
+                data-testid="pi-subagent-show-metrics"
+              />
+            }
+          />
+        </PiCard>
       </div>
 
       {/* 1. Pi 包管理 (pi install / update / remove) */}

@@ -1,11 +1,6 @@
-import { modeTriggerColor } from "@/chat-input-toolbar/display-help.js";
 import { memo, useCallback, useMemo } from "react";
-import { LightbulbIcon, XIcon, ChevronDownIcon } from "lucide-react";
-import {
-  ZCODE_AGENT_PROVIDER,
-  getZCodeAgentAvailableModes,
-  type ZCodeConfigOption,
-} from "@zcode/shared";
+import { ChevronDownIcon, EyeIcon, WrenchIcon } from "lucide-react";
+import type { ZCodeConfigOption } from "@zcode/shared";
 import {
   TID_CHAT_MODE_SELECT_TRIGGER,
   TID_CHAT_MODE_SELECT_ITEM,
@@ -16,36 +11,26 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
-  DropdownMenuCheckboxItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu.js";
 import { RollingToolbarLabel } from "@/chat-input-toolbar/RollingToolbarLabel.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
-import {
-  getModeOptionDisplayLabel,
-  getModeOptionDescriptionMessageId,
-  resolveModeOptionIcon,
-} from "@/chat-input-toolbar/display.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { useYoloModeConfirmation } from "@/hooks/useConfirmDialog.js";
 import { useConfirmDialogStore } from "@/store/confirmDialogStore.js";
 import { isCoarseTouchDevice } from "@/lib/pickerFocus.js";
 import { useShortcutCommandLabel } from "@/shortcuts/useShortcutBindings.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
-import {
-  getNextConfigSelectValue,
-  useToolbarShortcutBindings,
-} from "@/v4/composer/toolbarShortcuts.js";
+import { useToolbarShortcutBindings } from "@/v4/composer/toolbarShortcuts.js";
 import type { V4ComposerToolbarProps } from "@/v4/composer/V4ComposerToolbar.js";
 
 function noop(): void {}
 
-/** Plan 是独立勾选项，三种权限仍为单选；只编辑草稿，不向 Runtime 发切换命令。 */
+type PiModeId = "build" | "plan";
+
+/** Pi Zero 真实运行模式切换：标准模式（完整工具）与只读模式（--tools read,grep,find,ls）。 */
 function V4ComposerModeSwitchImpl({
-  provider,
   draftConfig,
   disabled,
   activeConfigPicker,
@@ -62,48 +47,70 @@ function V4ComposerModeSwitchImpl({
   | "onConfigPickerOpenChange"
   | "onSwitchMode"
 >) {
-  const { intl } = useZCodeIntl();
-  // 原草稿回调随 scope 换代，旧确认不能把权限写入后来选中的任务。
-  const confirmMode = useYoloModeConfirmation(disabled ? null : onSwitchMode, draftConfig?.mode);
-  const requestSwitchMode = useCallback(
-    (mode: string) => {
-      confirmMode(mode, () => onSwitchMode(mode));
-    },
-    [confirmMode, onSwitchMode],
-  );
-  const displayProvider = provider ?? ZCODE_AGENT_PROVIDER;
+  const { intl, locale } = useZCodeIntl();
+  const isZh = locale.toLowerCase().startsWith("zh");
+  const tr = useCallback((zh: string, en: string) => (isZh ? zh : en), [isZh]);
   const modeShortcutLabel = useShortcutCommandLabel("cycleSessionMode");
-  const modes = getZCodeAgentAvailableModes();
-  const permissions = modes.filter((mode) => mode.id !== "plan");
-  // 新菜单隐藏 Edit，但历史草稿仍可回显，不能因候选变化隐藏整个权限入口。
-  const selected =
-    permissions.find((mode) => mode.id === draftConfig?.mode) ??
-    (draftConfig?.mode === "edit" ? { id: "edit", name: "Edit" } : undefined);
-  const label = (mode: (typeof modes)[number]) =>
-    getModeOptionDisplayLabel(intl, displayProvider, { value: mode.id, name: mode.name });
-  const plan = modes.find((mode) => mode.id === "plan")!;
-  const planLabel = label(plan);
-  // Plan 拆成独立勾选项后仍需保留原菜单说明，复用相同的国际化映射。
-  const planDescriptionId = getModeOptionDescriptionMessageId(displayProvider, { value: plan.id });
+
+  const activeMode: PiModeId =
+    draftConfig?.planEnabled === true || draftConfig?.mode === "plan" ? "plan" : "build";
+
+  const handleSelectMode = useCallback(
+    (next: string) => {
+      if (next === "plan") {
+        onSwitchMode("plan");
+      } else {
+        onSwitchMode("plan-off");
+        onSwitchMode("build");
+      }
+    },
+    [onSwitchMode],
+  );
+
+  const modeEntries = useMemo(
+    () => [
+      {
+        id: "build" as const,
+        label: tr("标准模式", "Standard"),
+        description: tr(
+          "启用完整 Pi 工具（读/写/编辑文件与执行命令）。",
+          "Full Pi tools (read, write, edit files and run commands).",
+        ),
+        Icon: WrenchIcon,
+      },
+      {
+        id: "plan" as const,
+        label: tr("只读模式", "Read-only"),
+        description: tr(
+          "仅启用只读工具（read / grep / find / ls），适合代码审查与出方案。",
+          "Read-only tools (read / grep / find / ls) for exploration and planning.",
+        ),
+        Icon: EyeIcon,
+      },
+    ],
+    [tr],
+  );
+
+  const currentEntry = modeEntries.find((entry) => entry.id === activeMode) ?? modeEntries[0]!;
+
   const modeOption = useMemo<ZCodeConfigOption>(
     () => ({
       id: "mode",
       name: "Mode",
       category: "mode",
       type: "select",
-      currentValue: draftConfig?.mode ?? "build",
-      options: getZCodeAgentAvailableModes()
-        .filter((mode) => mode.id !== "plan")
-        .map((mode) => ({ value: mode.id, name: mode.name })),
+      currentValue: activeMode,
+      options: modeEntries.map((entry) => ({ value: entry.id, name: entry.label })),
     }),
-    [draftConfig?.mode],
+    [activeMode, modeEntries],
   );
+
   const cycle = useCallback(() => {
-    const next = getNextConfigSelectValue(modeOption);
-    if (next) requestSwitchMode(next);
-  }, [modeOption, requestSwitchMode]);
+    handleSelectMode(activeMode === "build" ? "plan" : "build");
+  }, [activeMode, handleSelectMode]);
+
   useToolbarShortcutBindings({
-    hasAnyOption: Boolean(selected),
+    hasAnyOption: true,
     toolbarDisabled: disabled,
     modelMenuDisabled: true,
     modeOption,
@@ -111,8 +118,9 @@ function V4ComposerModeSwitchImpl({
     onOpenModelMenu: noop,
     onCycleThoughtLevel: noop,
   });
-  if (!selected) return null;
-  const Icon = resolveModeOptionIcon(selected.id);
+
+  const TriggerIcon = currentEntry.Icon;
+
   return (
     <div className="flex min-w-0 items-center gap-1">
       <DropdownMenu
@@ -134,13 +142,12 @@ function V4ComposerModeSwitchImpl({
               aria-label={intl.formatMessage({ id: "chat.toolbar.mode.label" })}
               className={cn(
                 "group/mode h-7 gap-1 rounded-lg px-2 text-ui-base data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0",
-                modeTriggerColor(selected.id),
+                activeMode === "plan" ? "text-primary" : "text-foreground-subtle",
               )}
             >
-              <Icon className="size-4" />
+              <TriggerIcon className="size-4" />
               <span className="inline group-data-[composer-compact=true]/mode:hidden">
-                {/* Plan 菜单重写时普通 span 丢失了旧 ConfigSelect 的翻滚；复用同一动画组件恢复。 */}
-                <RollingToolbarLabel label={label(selected)} />
+                <RollingToolbarLabel label={currentEntry.label} />
               </span>
               <ChevronDownIcon className="size-3.5 group-data-[composer-compact=true]/mode:hidden" />
             </Button>
@@ -149,7 +156,7 @@ function V4ComposerModeSwitchImpl({
         <DropdownMenuContent
           side="top"
           sideOffset={4}
-          className="w-64"
+          className="w-68"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             if (!useConfirmDialogStore.getState().pendingRequest && !isCoarseTouchDevice())
@@ -158,44 +165,20 @@ function V4ComposerModeSwitchImpl({
                 ?.focus();
           }}
         >
-          <DropdownMenuCheckboxItem
-            checked={draftConfig?.planEnabled ?? false}
-            onCheckedChange={(checked) => onSwitchMode(checked ? "plan" : "plan-off")}
-            data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, "plan")}
-            className="min-h-13 items-start gap-3 py-2"
-          >
-            <LightbulbIcon className="mt-0.5 size-4.5 shrink-0" />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span>{planLabel}</span>
-              {planDescriptionId && (
-                <span className="text-ui-sm text-foreground-subtle">
-                  {intl.formatMessage({ id: planDescriptionId })}
-                </span>
-              )}
-            </span>
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuRadioGroup value={selected.id} onValueChange={requestSwitchMode}>
-            {permissions.map((mode) => {
-              const ModeIcon = resolveModeOptionIcon(mode.id);
-              const descriptionId = getModeOptionDescriptionMessageId(displayProvider, {
-                value: mode.id,
-              });
+          <DropdownMenuRadioGroup value={activeMode} onValueChange={handleSelectMode}>
+            {modeEntries.map((entry) => {
+              const ModeIcon = entry.Icon;
               return (
                 <DropdownMenuRadioItem
-                  key={mode.id}
-                  value={mode.id}
-                  data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, mode.id)}
+                  key={entry.id}
+                  value={entry.id}
+                  data-testid={testId(TID_CHAT_MODE_SELECT_ITEM, entry.id)}
                   className="min-h-13 items-start gap-3 py-2"
                 >
-                  <ModeIcon className="mt-0.5 size-4.5 shrink-0" />
+                  <ModeIcon className="mt-0.5 size-4 shrink-0" />
                   <span className="flex min-w-0 flex-col gap-0.5">
-                    <span>{label(mode)}</span>
-                    {descriptionId && (
-                      <span className="text-ui-sm text-foreground-subtle">
-                        {intl.formatMessage({ id: descriptionId })}
-                      </span>
-                    )}
+                    <span>{entry.label}</span>
+                    <span className="text-ui-sm text-foreground-subtle">{entry.description}</span>
                   </span>
                 </DropdownMenuRadioItem>
               );
@@ -203,33 +186,6 @@ function V4ComposerModeSwitchImpl({
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      {draftConfig?.planEnabled && (
-        <span data-testid="v4-composer-plan-marker" className="flex items-center gap-1">
-          <span
-            role="separator"
-            aria-orientation="vertical"
-            className="h-3 w-px shrink-0 bg-border"
-          />
-          <ControlHintTooltip title={intl.formatMessage({ id: "chat.plan.removeMarker" })}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              data-composer-collapse-priority="2"
-              onClick={() => onSwitchMode("plan-off")}
-              aria-label={intl.formatMessage({ id: "chat.plan.removeMarker" })}
-              className="group/plan h-7 gap-1 rounded-lg px-2 text-ui-base text-foreground-subtle hover:text-foreground-subtle data-[composer-compact=true]:w-7 data-[composer-compact=true]:px-0"
-            >
-              <LightbulbIcon className="size-4 group-hover/plan:hidden group-focus-visible/plan:hidden" />
-              <XIcon className="hidden size-4 group-hover/plan:block group-focus-visible/plan:block" />
-              <span className="inline group-data-[composer-compact=true]/plan:hidden">
-                {intl.formatMessage({ id: "mode.plan" })}
-              </span>
-            </Button>
-          </ControlHintTooltip>
-        </span>
-      )}
     </div>
   );
 }

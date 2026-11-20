@@ -4485,7 +4485,7 @@ const enUS: Record<string, string> = {
   "settings.defaultModel.reasoning": "Reasoning effort",
   "settings.defaultModel.unavailable": "{model} (disabled or unavailable)",
   "settings.defaultModel.cleared": "Reverted to automatic default model selection",
-  "settings.defaultModel.saved": "\"{model}\" is now the global default model",
+  "settings.defaultModel.saved": '"{model}" is now the global default model',
   "settings.defaultModel.saveError": "Failed to save the default model setting",
   "settings.preferDefaultModel": "Always start new conversations with this model",
   "settings.preferDefaultModelDescription":
@@ -4499,7 +4499,7 @@ const enUS: Record<string, string> = {
     "Official Zhipu plans disabled; chats will use custom providers only",
   "settings.officialPlans.saveError": "Failed to save the official plan switch",
   "settings.officialPlans.disabledHint":
-    "Official Zhipu plans are disabled: models in this group are hidden from the chat model list and are not used as default or fallback models. To restore them, turn on \"Enable official Zhipu plans\" above.",
+    'Official Zhipu plans are disabled: models in this group are hidden from the chat model list and are not used as default or fallback models. To restore them, turn on "Enable official Zhipu plans" above.',
   "settings.subscriptionUi": "Show subscription and plan entry points",
   "settings.subscriptionUiDescription":
     "When off, all subscription, plan, quota, and upgrade entry points are hidden, including the plan page in settings and the sidebar upgrade button. Account sign-in and model usage are unaffected.",
@@ -5137,7 +5137,8 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.addModel": "Add model",
   "settings.modelProvider.fetchModels": "Fetch models",
   "settings.modelProvider.fetchModelsTitle": "Fetch models from provider",
-  "settings.modelProvider.fetchModelsDescription": "Select models to add to this provider. Smart recommended configuration is applied automatically.",
+  "settings.modelProvider.fetchModelsDescription":
+    "Select models to add to this provider. Smart recommended configuration is applied automatically.",
   "settings.modelProvider.fetchModelsSearchPlaceholder": "Filter by model ID or owner…",
   "settings.modelProvider.fetchModelsLoading": "Fetching remote models…",
   "settings.modelProvider.fetchModelsEmpty": "The provider returned no models.",
@@ -5167,15 +5168,18 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.thinking.format.openai": "OpenAI (reasoning_effort)",
   "settings.modelProvider.thinking.format.openai-responses": "OpenAI Responses (reasoning.effort)",
   "settings.modelProvider.thinking.format.openrouter": "OpenRouter (reasoning)",
-  "settings.modelProvider.thinking.format.anthropic-adaptive": "Anthropic Adaptive (output_config.effort)",
+  "settings.modelProvider.thinking.format.anthropic-adaptive":
+    "Anthropic Adaptive (output_config.effort)",
   "settings.modelProvider.thinking.format.anthropic-budget": "Anthropic Budget (budget_tokens)",
   "settings.modelProvider.thinking.format.deepseek": "DeepSeek (thinking + reasoning_effort)",
   "settings.modelProvider.thinking.format.zai": "Z.ai / GLM (thinking.type)",
   "settings.modelProvider.thinking.format.qwen": "Qwen (enable_thinking)",
-  "settings.modelProvider.thinking.format.qwen-chat-template": "Qwen Chat Template (chat_template_kwargs)",
+  "settings.modelProvider.thinking.format.qwen-chat-template":
+    "Qwen Chat Template (chat_template_kwargs)",
   "settings.modelProvider.thinking.format.noop": "Omit reasoning params ({})",
   "settings.modelProvider.thinking.format.custom-cel": "Custom CEL expression",
-  "settings.modelProvider.thinking.quickStripLabel": "Pi 7-tier quick toggles (click to enable/skip tiers)",
+  "settings.modelProvider.thinking.quickStripLabel":
+    "Pi 7-tier quick toggles (click to enable/skip tiers)",
   "settings.modelProvider.thinking.tierNameColumn": "UI level name (low → high)",
   "settings.modelProvider.thinking.wireActionColumn": "Wire action / upstream value",
   "settings.modelProvider.thinking.action.value": "Send value",
@@ -5185,43 +5189,58 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.thinking.action.omit": "Omit ({})",
   "settings.modelProvider.thinking.wireValuePlaceholder": "Upstream value (defaults to level name)",
   "settings.modelProvider.thinking.budgetPlaceholder": "Tokens, e.g. 16384",
-  "settings.modelProvider.thinking.addCustomPlaceholder": "Custom level name, e.g. adaptive / turbo",
+  "settings.modelProvider.thinking.addCustomPlaceholder":
+    "Custom level name, e.g. adaptive / turbo",
   "settings.modelProvider.thinking.addCustomAction": "Add tier",
   "settings.modelProvider.thinking.moveUp": "Move tier up",
   "settings.modelProvider.thinking.moveDown": "Move tier down",
   "settings.modelProvider.thinking.advancedCelToggle": "Advanced: inspect / edit CEL mapping",
-  "settings.modelProvider.thinking.customCelNotice": "Using a custom or composite built-in CEL mapping. Edit the CEL expression below or choose a protocol/preset above to switch to visual mode.",
+  "settings.modelProvider.thinking.customCelNotice":
+    "Using a custom or composite built-in CEL mapping. Edit the CEL expression below or choose a protocol/preset above to switch to visual mode.",
   "settings.modelProvider.effectiveContextWindow": "Effective compression window (sweet spot)",
-  "settings.modelProvider.effectiveContextWindowPlaceholder": "Leave blank to follow global default or hard context window (e.g. 300000 / 500000 for 1M models)",
+  "settings.modelProvider.effectiveContextWindowPlaceholder":
+    "Leave blank to follow global default or hard context window (e.g. 300000 / 500000 for 1M models)",
   "settings.modelProvider.effectiveContextWindowBadge": "cap@{value}",
-  "settings.modelProvider.effectiveContextWindowBadgeTitle": "Effective compression window: {value}",
+  "settings.modelProvider.effectiveContextWindowBadgeTitle":
+    "Effective compression window: {value}",
   "settings.contextCompression": "Context compression",
   "settings.contextCompression.engine": "Context compression engine",
-  "settings.contextCompression.engineDescription": "Controls how long sessions compact context as they approach the effective window. Applies to new or resumed sessions.",
-  "settings.contextCompression.engine.dsh-compact": "DSH-Compact (Recommended · 60% trigger / 8-section checkpoint)",
-  "settings.contextCompression.engine.billion-context": "Billion-Context (ACP incremental tiered fold)",
+  "settings.contextCompression.engineDescription":
+    "Controls how long sessions compact context as they approach the effective window. Applies to new or resumed sessions.",
+  "settings.contextCompression.engine.dsh-compact":
+    "DSH-Compact (Recommended · 60% trigger / 8-section checkpoint)",
+  "settings.contextCompression.engine.billion-context":
+    "Billion-Context (ACP incremental tiered fold)",
   "settings.contextCompression.engine.legacy": "ZCode legacy compact (100% trigger / 1 round)",
   "settings.contextCompression.engine.disabled": "Disable auto-compact (manual /compact only)",
-  "settings.contextCompression.dshSummary": "Ported from pi-dsh-compact: zero daily overhead (keeps Prefix Cache intact), 60% default trigger with ~20% trailing rounds kept, head-4096 + tail-1024 tool output pruning, <supermemory> stripping, and a tool-free DSH 8-section checkpoint with <read-files>/<modified-files> tracking.",
-  "settings.contextCompression.biliAttribution": "Built-in native ACP incremental tiered compression with on-demand fold, search, and decompress. Powered by open-source billion-context / acp-kernel (MIT):",
+  "settings.contextCompression.dshSummary":
+    "Ported from pi-dsh-compact: zero daily overhead (keeps Prefix Cache intact), 60% default trigger with ~20% trailing rounds kept, head-4096 + tail-1024 tool output pruning, <supermemory> stripping, and a tool-free DSH 8-section checkpoint with <read-files>/<modified-files> tracking.",
+  "settings.contextCompression.biliAttribution":
+    "Built-in native ACP incremental tiered compression with on-demand fold, search, and decompress. Powered by open-source billion-context / acp-kernel (MIT):",
   "settings.contextCompression.defaultEffectiveWindow": "Default effective compression window",
-  "settings.contextCompression.defaultEffectiveWindowDescription": "Fallback soft cap when a model does not define its own effective compression window (e.g. keep 1M models within a 300K/500K high-attention zone).",
+  "settings.contextCompression.defaultEffectiveWindowDescription":
+    "Fallback soft cap when a model does not define its own effective compression window (e.g. keep 1M models within a 300K/500K high-attention zone).",
   "settings.contextCompression.unlimited": "Unlimited",
   "settings.contextCompression.dshThresholds": "Trigger & retention ratios",
-  "settings.contextCompression.dshThresholdsDescription": "Configure DSH-Compact trigger threshold (30%–95%, default 60%) and recent context retention ratio (5%–50%, default 20%).",
+  "settings.contextCompression.dshThresholdsDescription":
+    "Configure DSH-Compact trigger threshold (30%–95%, default 60%) and recent context retention ratio (5%–50%, default 20%).",
   "settings.contextCompression.thresholdRatio": "Trigger",
   "settings.contextCompression.retainRatio": "Retain",
   "settings.contextCompression.recoverOnOverflow": "Recover on context overflow",
-  "settings.contextCompression.recoverOnOverflowDescription": "Automatically run bounded compaction and retry when the upstream rejects a request for context overflow.",
+  "settings.contextCompression.recoverOnOverflowDescription":
+    "Automatically run bounded compaction and retry when the upstream rejects a request for context overflow.",
   "settings.contextCompression.microcompact": "Prune old tool outputs (Microcompact)",
-  "settings.contextCompression.microcompactDescription": "Clear older verbose tool results before full compaction fires.",
+  "settings.contextCompression.microcompactDescription":
+    "Clear older verbose tool results before full compaction fires.",
   "settings.contextCompression.biliBands": "Fold bands & growth step",
-  "settings.contextCompression.biliBandsDescription": "Nudge the model gently above the floor once growth exceeds the step, and strongly above the pressure ceiling.",
+  "settings.contextCompression.biliBandsDescription":
+    "Nudge the model gently above the floor once growth exceeds the step, and strongly above the pressure ceiling.",
   "settings.contextCompression.biliMinPct": "Floor",
   "settings.contextCompression.biliMaxPct": "Pressure",
   "settings.contextCompression.biliGrowthFloor": "Step",
   "settings.contextCompression.biliProtect": "Protected recent tail",
-  "settings.contextCompression.biliProtectDescription": "Keep the newest messages and a minimum token budget verbatim so active work stays untouched.",
+  "settings.contextCompression.biliProtectDescription":
+    "Keep the newest messages and a minimum token budget verbatim so active work stays untouched.",
   "settings.contextCompression.biliPreserveMessages": "Messages",
   "settings.contextCompression.biliPreserveTokens": "Min tokens",
   "settings.contextCompression.saveError": "Failed to save context compression settings",
@@ -6448,8 +6467,8 @@ const enUS: Record<string, string> = {
   "chat.emptyResult.description":
     "This task finished without any chat content. It may have been stopped before the model produced a response.",
   "chat.placeholder.newTask":
-    "Ask ZCode anything, @ to add context, / for commands or capabilities",
-  "chat.placeholder.newTaskMobile": "Ask ZCode anything…",
+    "Ask Pi Zero anything, @ to add context, / for commands or capabilities",
+  "chat.placeholder.newTaskMobile": "Ask Pi Zero anything…",
   "chat.placeholder.followUpAsk": "Ask for follow-up changes",
   "chat.placeholder.followUpQueue": "Keep typing to queue follow-up changes",
   "chat.placeholder.loading": "Initializing task...",

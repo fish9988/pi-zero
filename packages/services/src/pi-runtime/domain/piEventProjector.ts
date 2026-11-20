@@ -2,7 +2,7 @@
  * Pi RPC 流式事件 -> ZCode V4 ConversationSnapshot / ConversationDelta 纯投影器（domain 层）。
  * 严禁引入任何 Node IO、网络或计时器依赖；所有时间戳均由调用方显式传入 `nowMs`。
  */
-import type { ModelSelection } from "@zcode/shared";
+import type { ModelSelection, ZCodeSessionSubagentsResult } from "@zcode/shared";
 import {
   PROTOCOL_V4_LIMITS,
   type ConversationDelta,
@@ -41,10 +41,15 @@ import {
   computeSessionAvailability,
   computeSessionControl,
   createInitialConversationSnapshot,
+  deriveAssistantPreview,
   deriveSessionTitle,
   isSessionRunningPhase,
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
+import {
+  buildSubagentDirectoryProjection,
+  type VirtualSubagentSessionPayload,
+} from "#src/pi-runtime/domain/piSubagentProjector.js";
 import { reducePiStreamEvent } from "#src/pi-runtime/domain/piStreamEventReducer.js";
 import {
   applyHydratedReplacementToState,
@@ -66,6 +71,12 @@ export interface BeginUserTurnInput {
   readonly clientId: string;
   readonly text: string;
   readonly nowMs: number;
+  readonly attachments?:
+    | import("@zcode/shared/zcode-protocol-v4").UserInputRow["attachments"]
+    | undefined;
+  readonly conversationQuotes?:
+    | import("@zcode/shared/zcode-protocol-v4").UserInputRow["conversationQuotes"]
+    | undefined;
   readonly modelSelection?: ModelSelection | undefined;
   readonly inputOrigin?: "desktop" | "mobile" | undefined;
   readonly recordEchoExpectation?: boolean | undefined;
@@ -157,6 +168,10 @@ export class PiEventProjector {
       turnFileChanges: new Map(),
       fileChangesByTurnId: new Map(input.hydrated?.fileChangesByTurnId ?? []),
       pendingExtensionUiById: new Map(),
+      subagentRevision: 0,
+      subagentRowIdByChildId: new Map(),
+      subagentSessionsByChildId: new Map(),
+      dirtySubagentChildIds: new Set(),
       getRowById: (rowId) => this.getRowById(rowId),
     };
   }
@@ -248,6 +263,8 @@ export class PiEventProjector {
           text: input.text,
           commandId: input.commandId,
           clientId: input.clientId,
+          attachments: input.attachments,
+          conversationQuotes: input.conversationQuotes,
           modelSelection: input.modelSelection ?? this.state.snapshot.config.modelSelection,
           inputOrigin: input.inputOrigin,
         }),
@@ -501,11 +518,110 @@ export class PiEventProjector {
     );
   }
 
+  /** 查找目标用户消息在所有真实用户消息中的 0-based 序号（用于精准定位 Pi `.jsonl` 中对应的 user entry）。 */
+  findUserRowInfo(targetRowId: number): {
+    readonly row: Extract<WireConversationRow, { kind: "userInput" }>;
+    readonly userOrdinal: number;
+  } | null {
+    let ordinal = 0;
+    for (const row of this.allRows) {
+      if (row.kind !== "userInput" || row.guided) continue;
+      if (row.rowId === targetRowId) {
+        return { row, userOrdinal: ordinal };
+      }
+      ordinal += 1;
+    }
+    return null;
+  }
+
+  /** 内存兜底回退：移除 `targetRowId` 所在回合及之后所有行，保留之前历史。 */
+  rewindInMemoryBeforeRow(targetRowId: number, newLogEpoch: string): void {
+    const targetRow = this.getRowById(targetRowId);
+    const targetTurnId = targetRow?.turnId;
+    const cutIndex = this.allRows.findIndex(
+      (row) => row.rowId === targetRowId || (targetTurnId && row.turnId === targetTurnId),
+    );
+    const keptRows = cutIndex >= 0 ? this.allRows.slice(0, cutIndex) : [...this.allRows];
+    const keptTurnIds = new Set(keptRows.map((row) => row.turnId));
+    const keptFileChanges = new Map<string, V4ConversationFileChangesResult>();
+    for (const [turnId, changes] of this.state.fileChangesByTurnId) {
+      if (keptTurnIds.has(turnId)) keptFileChanges.set(turnId, changes);
+    }
+    let lastPreview: string | undefined;
+    for (let i = keptRows.length - 1; i >= 0; i -= 1) {
+      const row = keptRows[i];
+      if (row && row.kind === "assistantText" && row.text.trim()) {
+        lastPreview = deriveAssistantPreview(row.text);
+        break;
+      }
+    }
+    applyHydratedReplacementToState(
+      this.state,
+      this.allRows,
+      this.rowIndexById,
+      {
+        title: this.state.snapshot.meta.title,
+        titleSource: this.state.snapshot.meta.titleSource,
+        lastAssistantPreview: lastPreview,
+        phase: keptRows.length > 0 ? "completedSuccess" : "draft",
+        config: this.state.snapshot.config,
+        contextWindowMax: this.state.contextWindowMax,
+        usage: this.state.snapshot.usage,
+        rows: keptRows,
+        fileChangesByTurnId: keptFileChanges,
+      },
+      newLogEpoch,
+    );
+  }
+
   applyRename(title: string): ProjectionCommit | null {
     return this.commitDeltas(
       [{ op: "state.updated", patch: { meta: { title: title.trim(), titleSource: "custom" } } }],
       true,
     );
+  }
+
+  /** 取出本次流式更新产生或刷新的虚拟子代理会话快照，供宿主同步至右侧 Subagent 面板。 */
+  drainDirtyVirtualSubagentSessions(): VirtualSubagentSessionPayload[] {
+    if (this.state.dirtySubagentChildIds.size === 0) return [];
+    const out: VirtualSubagentSessionPayload[] = [];
+    for (const childId of this.state.dirtySubagentChildIds) {
+      const payload = this.state.subagentSessionsByChildId.get(childId);
+      if (payload) out.push(payload);
+    }
+    this.state.dirtySubagentChildIds.clear();
+    return out;
+  }
+
+  getSubagentDirectorySnapshot(): ZCodeSessionSubagentsResult {
+    const projected = buildSubagentDirectoryProjection(
+      Array.from(this.state.subagentSessionsByChildId.values()),
+      this.state.subagentRevision,
+    );
+    return {
+      revision: projected.state.revision,
+      childSessionIds: projected.state.childSessionIds,
+      running: projected.state.running,
+      ended: {
+        total: projected.ended.length,
+        items: [...projected.ended],
+      },
+    };
+  }
+
+  /** 用最新虚拟子代理快照原位刷新（供只读子代理控制器向右侧 SubagentSessionSidePane 推送实时更新）。 */
+  replaceWithVirtualSnapshot(
+    snapshot: ConversationSnapshot,
+    rows: readonly WireConversationRow[],
+  ): void {
+    this.allRows.length = 0;
+    this.rowIndexById.clear();
+    for (const row of rows) {
+      this.rowIndexById.set(row.rowId, this.allRows.length);
+      this.allRows.push(row);
+    }
+    this.state.nextRowId = rows.reduce((max, r) => Math.max(max, r.rowId), 0);
+    this.state.snapshot = snapshot;
   }
 
   applyPiEvent(event: PiRpcEvent, nowMs: number): ProjectionCommit | null {

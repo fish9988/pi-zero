@@ -12,3 +12,4 @@ export {
 export { PiBtwPopover } from "./PiBtwPopover.js";
 export { PiBranchTreeDialog } from "./PiBranchTreeDialog.js";
 export { PiConversationFloatingActions, PiConversationOverlays } from "./PiConversationControls.js";
+export { PiExtensionStatusStrip } from "./PiExtensionStatusStrip.js";

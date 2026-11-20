@@ -240,12 +240,25 @@ export function isReasoningSummaryOverflowing({
 export function resolveReasoningStreamingSummary(
   streamingText: string,
 ): { key: string; text: string } | null {
-  const lines = streamingText.replace(/\r\n?/gu, "\n").split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const text = lines[index]?.trim() ?? "";
-    if (text.length > 0) {
-      return { key: String(index), text };
+  // O(末行长度) 逆向扫描最后一条非空行，避免长思考流式输出时每次 chunk 全文正则替换 + split。
+  let end = streamingText.length;
+  while (end > 0) {
+    let start = streamingText.lastIndexOf("\n", end - 1);
+    const crIdx = streamingText.lastIndexOf("\r", end - 1);
+    if (crIdx > start) start = crIdx;
+    const lineStart = start + 1;
+    const slice = streamingText.slice(lineStart, end).trim();
+    if (slice.length > 0) {
+      let lineIndex = 0;
+      for (let i = 0; i < lineStart; i += 1) {
+        const ch = streamingText.charCodeAt(i);
+        if (ch === 10 || (ch === 13 && streamingText.charCodeAt(i + 1) !== 10)) {
+          lineIndex += 1;
+        }
+      }
+      return { key: String(lineIndex), text: slice };
     }
+    end = start;
   }
   return null;
 }
@@ -426,6 +439,44 @@ export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & 
   variant?: "default" | "nested";
 };
 
+const LONG_REASONING_CHUNK_THRESHOLD = 1600;
+const LONG_REASONING_CHUNK_TARGET_CHARS = 900;
+
+/** 长思考文本按换行边界切分为独立渲染块，配合 content-visibility:auto 让展开动画只排版可见视口。 */
+function splitReasoningChunks(text: string): string[] {
+  if (text.length <= LONG_REASONING_CHUNK_THRESHOLD) return [text];
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const remaining = text.length - cursor;
+    if (remaining <= LONG_REASONING_CHUNK_TARGET_CHARS * 1.4) {
+      chunks.push(text.slice(cursor));
+      break;
+    }
+    let splitAt = text.indexOf("\n\n", cursor + LONG_REASONING_CHUNK_TARGET_CHARS);
+    if (splitAt < 0 || splitAt - cursor > LONG_REASONING_CHUNK_TARGET_CHARS * 2) {
+      splitAt = text.indexOf("\n", cursor + LONG_REASONING_CHUNK_TARGET_CHARS);
+    }
+    if (splitAt < 0 || splitAt - cursor > LONG_REASONING_CHUNK_TARGET_CHARS * 2.5) {
+      splitAt = cursor + LONG_REASONING_CHUNK_TARGET_CHARS;
+    } else {
+      splitAt += 1;
+    }
+    chunks.push(text.slice(cursor, splitAt));
+    cursor = splitAt;
+  }
+  return chunks;
+}
+
+const REASONING_VIEWPORT_CONTAIN_STYLE: CSSProperties = {
+  contain: "layout style",
+};
+
+const REASONING_CHUNK_CV_STYLE: CSSProperties = {
+  contentVisibility: "auto",
+  containIntrinsicSize: "auto 84px",
+};
+
 export const ReasoningContent = memo(
   ({ className, children, forceMount, variant = "default", ...props }: ReasoningContentProps) => {
     const { isOpen, shouldRenderContent } = useReasoning();
@@ -437,6 +488,17 @@ export const ReasoningContent = memo(
       maskData: scrollMaskData,
       maskStyle: scrollMaskStyle,
     } = useBottomFollowingScroll(shouldRenderChildren, children);
+    const chunks = useMemo(
+      () => (shouldRenderChildren ? splitReasoningChunks(children) : []),
+      [shouldRenderChildren, children],
+    );
+    const viewportStyle = useMemo<CSSProperties>(
+      () =>
+        scrollMaskStyle
+          ? { ...REASONING_VIEWPORT_CONTAIN_STYLE, ...scrollMaskStyle }
+          : REASONING_VIEWPORT_CONTAIN_STYLE,
+      [scrollMaskStyle],
+    );
 
     return (
       <CollapsibleContent
@@ -458,19 +520,24 @@ export const ReasoningContent = memo(
               )}
               data-reasoning-scroll-mask={scrollMaskData}
               onScroll={handleScroll}
-              style={scrollMaskStyle}
+              style={viewportStyle}
             >
               {/* 思考块之前打开时把 Radix content 一起按需挂载并强制 forceMount，
                   content 首帧已经是 open 状态，高度动画来不及从 closed 状态过渡，看起来像突然展开。
                   这里和工具详情保持一致：CollapsibleContent 只负责 Presence/高度动画，重内容单独延迟卸载；
                   间距放在动画内容内部，避免 closed 动画结束时父级 gap/padding 被移除造成末帧跳动。
-                  性能修复：thought 内容可能非常长且会流式追加，展开后如果继续走 MessageResponse/Streamdown，
-                  每次 chunk 都会重跑 Markdown 解析和插件渲染，字数越多越卡；这里按纯文本展示并保留换行。 */}
+                  性能修复：超长思考文本切分为多段并启用 content-visibility: auto，展开/滚动时仅排版可见区。 */}
               <div
                 ref={contentRef}
                 className="min-w-0 whitespace-pre-wrap break-words text-foreground-subtlest"
               >
-                {children}
+                {chunks.length <= 1
+                  ? children
+                  : chunks.map((chunk, idx) => (
+                      <div key={idx} style={REASONING_CHUNK_CV_STYLE}>
+                        {chunk}
+                      </div>
+                    ))}
               </div>
             </div>
           </div>

@@ -231,5 +231,6 @@ export interface PiCustomProviderSaveInput {
 }
 
 export interface PiConfigChangeEvent {
-  readonly area: "settings" | "models" | "auth" | "resources" | "runtime";
+  readonly area: "settings" | "models" | "auth" | "resources" | "runtime" | "extensionUi";
+  readonly sessionId?: string | undefined;
 }

@@ -25,6 +25,22 @@ import {
 } from "./PiPrimitives.js";
 import { usePiChangeSubscription, usePiConfigService, usePiText } from "./usePiConfig.js";
 
+const LEGACY_ZCODE_PROVIDER_IDS = new Set([
+  "zcode",
+  "zcode-start",
+  "zcode-coding-plan",
+  "bigmodel-coding-plan",
+  "bigmodel-team-coding-plan",
+  "bigmodel-start-plan",
+  "zai-coding-plan",
+  "zai-team-coding-plan",
+  "zai-start-plan",
+]);
+
+function isLegacyZCodeProviderId(providerId: string): boolean {
+  return LEGACY_ZCODE_PROVIDER_IDS.has(providerId.trim().toLowerCase());
+}
+
 function mergeBuiltinProviders(live: readonly PiProviderAuthStatus[]): PiProviderAuthStatus[] {
   const byId = new Map<string, PiProviderAuthStatus>();
   for (const item of live) byId.set(item.id, item);
@@ -97,8 +113,18 @@ export function PiCredentialsSection() {
     );
   }, [providers, query]);
 
-  const configured = useMemo(() => filtered.filter((item) => item.configured), [filtered]);
-  const unconfigured = useMemo(() => filtered.filter((item) => !item.configured), [filtered]);
+  const configured = useMemo(
+    () => filtered.filter((item) => item.configured && !isLegacyZCodeProviderId(item.id)),
+    [filtered],
+  );
+  const legacyProviders = useMemo(
+    () => filtered.filter((item) => item.configured && isLegacyZCodeProviderId(item.id)),
+    [filtered],
+  );
+  const unconfigured = useMemo(
+    () => filtered.filter((item) => !item.configured && !isLegacyZCodeProviderId(item.id)),
+    [filtered],
+  );
 
   const loginCommandDisplay = snapshot?.loginCommand.displayCommand ?? "pi /login";
 
@@ -324,6 +350,45 @@ export function PiCredentialsSection() {
                 {tr("已配置", "Configured")} · {configured.length}
               </div>
               {configured.map(renderProviderRow)}
+            </>
+          ) : null}
+          {legacyProviders.length > 0 ? (
+            <>
+              <div className="border-t border-border bg-surface px-4 py-1.5 text-ui-xs font-medium text-foreground-subtle first:border-t-0">
+                {tr(
+                  "旧版 ZCode 遗留凭据（已失效，可安全清理）",
+                  "Legacy ZCode Credentials (Deprecated)",
+                )}{" "}
+                · {legacyProviders.length}
+              </div>
+              {legacyProviders.map((provider) => (
+                <PiRow
+                  key={provider.id}
+                  testId={`pi-legacy-provider-row-${provider.id}`}
+                  label={
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground-subtle line-through">{provider.name}</span>
+                      <PiStatusPill tone="warning">{tr("已失效", "Deprecated")}</PiStatusPill>
+                    </div>
+                  }
+                  hint={tr(
+                    "来自旧版 ZCode 订阅体系，Pi Zero 中已不可用，建议移除以避免混淆。",
+                    "From legacy ZCode subscription; no longer active in Pi Zero.",
+                  )}
+                  control={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid={`pi-legacy-provider-remove-${provider.id}`}
+                      onClick={() => void handleRemoveCredential(provider)}
+                    >
+                      <Trash2 className="size-3.5 text-destructive" />
+                      {tr("清理遗留", "Remove")}
+                    </Button>
+                  }
+                />
+              ))}
             </>
           ) : null}
           {unconfigured.length > 0 ? (

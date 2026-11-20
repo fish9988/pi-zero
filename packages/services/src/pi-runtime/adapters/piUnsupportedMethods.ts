@@ -61,7 +61,6 @@ export type PiUnsupportedAgentMethods = Pick<
   | "onDynamicStorageStartupState"
   | "syncAppRuntimePreferences"
   | "syncDynamicWorkflowUserMode"
-  | "listSessionSubagents"
   | "getAppUsageStats"
   | "supportsWorktreeCwd"
   | "supportsExtensionInputSource"
@@ -191,12 +190,6 @@ export function createPiUnsupportedAgentMethods(): PiUnsupportedAgentMethods {
     onDynamicStorageStartupState: () => RpcEvent.None,
     syncAppRuntimePreferences: async () => {},
     syncDynamicWorkflowUserMode: async () => {},
-    listSessionSubagents: async () => ({
-      revision: 0,
-      childSessionIds: [],
-      running: [],
-      ended: { total: 0, items: [] },
-    }),
     getAppUsageStats: async (params) => emptyAppUsageSnapshot(params.range, params.timeZone),
     supportsWorktreeCwd: async () => false,
     supportsExtensionInputSource: async () => false,

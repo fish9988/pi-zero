@@ -241,6 +241,33 @@ export type PiResourceMutationResult =
   | { readonly op: "deleted"; readonly deleted: boolean }
   | { readonly op: "systemDoc"; readonly doc: PiSystemDoc };
 
+export interface PiExtensionStatusEntry {
+  readonly key: string;
+  readonly text: string;
+  readonly updatedAt: number;
+}
+
+export interface PiExtensionWidgetEntry {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly placement?: "aboveEditor" | "belowEditor" | undefined;
+  readonly updatedAt: number;
+}
+
+export interface PiExtensionNotificationEntry {
+  readonly id: string;
+  readonly message: string;
+  readonly notifyType: "info" | "warning" | "error";
+  readonly at: number;
+}
+
+export interface PiSessionExtensionUiSnapshot {
+  readonly sessionId: string;
+  readonly statuses: readonly PiExtensionStatusEntry[];
+  readonly widgets: readonly PiExtensionWidgetEntry[];
+  readonly lastNotification?: PiExtensionNotificationEntry | undefined;
+}
+
 export type PiSessionEcosystemAction =
   | { readonly op: "btw"; readonly request: PiBtwRequest }
   | {
@@ -262,6 +289,10 @@ export type PiSessionEcosystemAction =
       readonly workspacePath: string;
       readonly sessionId: string;
       readonly entryId: string;
+    }
+  | {
+      readonly op: "getExtensionUiState";
+      readonly sessionId: string;
     };
 
 export type PiSessionEcosystemResult =
@@ -269,4 +300,5 @@ export type PiSessionEcosystemResult =
   | { readonly op: "exportHtml"; readonly result: PiExportHtmlResult }
   | { readonly op: "getTree"; readonly tree: PiSessionTreeSnapshot }
   | { readonly op: "fork"; readonly result: PiForkSessionResult }
-  | { readonly op: "rewindTo"; readonly result: PiRewindSessionResult };
+  | { readonly op: "rewindTo"; readonly result: PiRewindSessionResult }
+  | { readonly op: "getExtensionUiState"; readonly state: PiSessionExtensionUiSnapshot };

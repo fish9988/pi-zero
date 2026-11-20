@@ -13,6 +13,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import type { PiModelInfo } from "#src/pi-runtime/contract.js";
 import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
+import type { VirtualSubagentSessionPayload } from "#src/pi-runtime/domain/piSubagentProjector.js";
 import {
   getSupportedThinkingLevels,
   pickDefaultThinkingLevel,
@@ -30,7 +31,17 @@ export interface PiSessionControllerCallbacks {
   onSessionPublishedOrUpdated(summary: SessionSummary): void;
   onSessionLifecycleChanged(snapshot: SessionLifecycleSnapshot): void;
   onSessionDeleted(sessionId: string): void;
+  onVirtualSubagentSessionsUpdated?(payloads: readonly VirtualSubagentSessionPayload[]): void;
 }
+
+export type PiExecutionMode = "build" | "plan";
+
+/** 将 ZCode 历史权限模式收敛为 Pi 原生真实支持的两种工具模式：标准（完整工具）与只读（探索/规划）。 */
+export function normalizePiExecutionMode(mode: string | undefined): PiExecutionMode {
+  return mode === "plan" ? "plan" : "build";
+}
+
+export const PI_READ_ONLY_TOOLS_ARG = "read,grep,find,ls";
 
 export interface PiSessionControllerOptions {
   readonly sessionId: string;
@@ -41,6 +52,7 @@ export interface PiSessionControllerOptions {
   readonly parentSessionId?: string | undefined;
   readonly modelSelection?: ModelSelection | undefined;
   readonly thoughtLevel?: string | undefined;
+  readonly mode?: string | undefined;
   readonly catalog: PiModelCatalog;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly platform?: NodeJS.Platform | undefined;
@@ -272,7 +284,7 @@ export function resolveRequestedSelectionSwitch(
   };
 }
 
-/** 发现本机/测试 Pi 并以会话当前模型、思考档位与 sessionFile 选项拉起 RPC 子进程。 */
+/** 发现本机/测试 Pi 并以会话当前模型、思考档位、工具模式与 sessionFile 选项拉起 RPC 子进程。 */
 export async function spawnConfiguredPiClient(input: {
   sessionId: string;
   cwd: string;
@@ -283,6 +295,7 @@ export async function spawnConfiguredPiClient(input: {
   provider?: string | undefined;
   model?: string | undefined;
   thought?: string | undefined;
+  mode?: string | undefined;
   isDisposed: () => boolean;
 }): Promise<{ readonly client: PiRpcClient; readonly sessionFile: string | undefined }> {
   const launch = await discoverPi({
@@ -309,6 +322,9 @@ export async function spawnConfiguredPiClient(input: {
   }
   if (input.isDisposed()) throw new Error("Session disposed while preparing Pi session file");
 
+  const executionMode = normalizePiExecutionMode(input.mode);
+  const extraArgs = executionMode === "plan" ? ["--tools", PI_READ_ONLY_TOOLS_ARG] : undefined;
+
   const client = await PiRpcClient.spawn({
     launch,
     cwd: effectiveCwd,
@@ -317,6 +333,7 @@ export async function spawnConfiguredPiClient(input: {
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.thought ? { thinkingLevel: input.thought } : {}),
+    ...(extraArgs ? { extraArgs } : {}),
   });
   if (input.isDisposed()) {
     await client.closeAndWait(2_000).catch(() => {});
@@ -330,6 +347,7 @@ export function resolveInitialControllerConfig(input: {
   catalog: PiModelCatalog;
   modelSelection?: ModelSelection | undefined;
   thoughtLevel?: string | undefined;
+  mode?: string | undefined;
 }): { readonly config: SessionConfigState; readonly contextWindowMax: number | undefined } {
   const snap = input.catalog.getSnapshot();
   const effectiveSelection: ModelSelection | undefined = input.modelSelection
@@ -343,6 +361,7 @@ export function resolveInitialControllerConfig(input: {
     catalogModels: snap.models,
     defaultModel: snap.defaultModel,
     defaultThinkingLevel: input.thoughtLevel ?? snap.defaultThinkingLevel,
+    mode: normalizePiExecutionMode(input.mode),
   });
   const matched = snap.models.find(
     (model) => model.provider === config.provider && model.id === config.model,

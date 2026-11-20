@@ -114,6 +114,7 @@ export class PiWorkspaceHub {
       parentSessionId?: string | undefined;
       modelSelection?: ModelSelection | undefined;
       thoughtLevel?: string | undefined;
+      mode?: string | undefined;
       hydratedFromDisk?:
         | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
         | undefined;
@@ -131,6 +132,7 @@ export class PiWorkspaceHub {
       parentSessionId: input.parentSessionId,
       modelSelection: input.modelSelection,
       thoughtLevel: input.thoughtLevel,
+      mode: input.mode,
       catalog: this.catalog,
       env: this.env,
       platform: this.platform,
@@ -151,6 +153,23 @@ export class PiWorkspaceHub {
           this.emitSessionsIndexDeltas(bucket, [
             { op: "session.removed", sessionId: deletedSessionId },
           ]);
+        },
+        onVirtualSubagentSessionsUpdated: (payloads) => {
+          for (const payload of payloads) {
+            const existing = bucket.sessions.get(payload.childSessionId);
+            if (existing) {
+              existing.updateVirtualSubagentSnapshot(payload.snapshot, payload.rows);
+            } else {
+              this.createSessionController(bucket, {
+                sessionId: payload.childSessionId,
+                parentSessionId: payload.parentSessionId,
+                readOnlyArchive: {
+                  snapshot: payload.snapshot,
+                  rows: payload.rows,
+                },
+              });
+            }
+          }
         },
       },
     });

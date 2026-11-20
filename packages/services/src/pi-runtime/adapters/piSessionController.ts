@@ -21,12 +21,14 @@ import {
   type CommandPayloadMap,
   type SessionSummary,
   type SubscribeAck,
+  type UserInputRow,
   type V4ConversationFileChangesResult,
   type V4ConversationRowsRangeResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import type { PiModelInfo, PiRpcEvent, PiRpcExitInfo } from "#src/pi-runtime/contract.js";
 import type { HydratedPiSessionResult } from "#src/pi-runtime/domain/piJsonlHydrator.js";
+import { rewindPiSessionFileBeforeOrdinal } from "#src/pi-runtime/adapters/piSessionRewind.js";
 import {
   PiEventProjector,
   type ProjectionCommit,
@@ -39,6 +41,10 @@ import {
 } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { formatRedactedPiError } from "#src/pi-runtime/adapters/piDiscover.js";
 import {
+  applyPiExtensionUiEvent,
+  clearPiSessionExtensionUiState,
+} from "#src/pi-runtime/adapters/piExtensionUiStateStore.js";
+import {
   emitConversationDeltaFrames,
   emitConversationSnapshotFrames,
   type TopicSubscriptionState,
@@ -47,10 +53,12 @@ import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js"
 import {
   cancelClientInteractionsAndAbort,
   hydratePiClientInitialState,
+  normalizePiExecutionMode,
   resolveInitialControllerConfig,
   resolveRequestedSelectionSwitch,
   spawnConfiguredPiClient,
   syncPiModelAndThoughtToClient,
+  type PiExecutionMode,
   type PiSessionControllerCallbacks,
   type PiSessionControllerOptions,
   type ResolvedModelTarget,
@@ -92,7 +100,9 @@ export class PiSessionController {
   private activeClientModel: PiModelInfo | undefined;
   private activeClientModelKey = "";
   private activeClientThinking = "";
+  private activeClientMode: PiExecutionMode = "build";
   private piSessionFile: string | undefined;
+  private inFlightPromptDispatch: Promise<void> | null = null;
   private disposed = false;
 
   constructor(options: PiSessionControllerOptions) {
@@ -118,7 +128,9 @@ export class PiSessionController {
       catalog: this.catalog,
       modelSelection: options.modelSelection,
       thoughtLevel: options.thoughtLevel,
+      mode: options.mode,
     });
+    this.activeClientMode = normalizePiExecutionMode(config.mode);
     this.projector = new PiEventProjector({
       sessionId: this.sessionId,
       workspacePath: this.workspacePath,
@@ -148,6 +160,19 @@ export class PiSessionController {
   }
   getTurnFileChanges(target: { rowId: number; entityId: string }): V4ConversationFileChangesResult {
     return this.projector.getTurnFileChanges(target);
+  }
+  getSubagentDirectorySnapshot() {
+    return this.projector.getSubagentDirectorySnapshot();
+  }
+  updateVirtualSubagentSnapshot(
+    snapshot: import("@zcode/shared/zcode-protocol-v4").ConversationSnapshot,
+    rows: readonly import("@zcode/shared/zcode-protocol-v4").WireConversationRow[],
+  ): void {
+    this.lastActivityAt = Date.now();
+    this.projector.replaceWithVirtualSnapshot(snapshot, rows);
+    for (const sub of this.subscriptions.values()) {
+      this.emitSnapshotToSubscription(sub, "recovery");
+    }
   }
   unsubscribe(subscriptionId: string): void {
     this.subscriptions.delete(subscriptionId);
@@ -241,10 +266,22 @@ export class PiSessionController {
     commandId: string;
     clientId: string;
     text: string;
+    attachments?: UserInputRow["attachments"] | undefined;
+    conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
     modelSelection?: ModelSelection | undefined;
+    mode?: string | undefined;
     inputOrigin?: "desktop" | "mobile" | undefined;
   }): Promise<CommandAck> {
-    return this.startFreshTurn(input);
+    if (input.mode) {
+      const normalizedMode = normalizePiExecutionMode(input.mode);
+      const prev = this.projector.getSnapshot().config;
+      if (prev.mode !== normalizedMode) {
+        this.broadcastCommit(this.projector.applyConfigUpdate({ ...prev, mode: normalizedMode }));
+      }
+    }
+    // 首页首条提交采用“先发布+先回显+立即返回 ACK，后台异步拉起 Pi 并投递 prompt”，
+    // 消除侧栏秒出但主界面原地等待 Pi 冷启动 1-2 秒才跳转的割裂感。
+    return this.startFreshTurn(input, { nonBlocking: true });
   }
 
   async executeCommand(envelope: CommandEnvelope): Promise<CommandAck> {
@@ -311,18 +348,122 @@ export class PiSessionController {
       ensureClient: () => this.ensureClient(),
       broadcastCommit: (commit) => this.broadcastCommit(commit),
       applyLiveModelSwitch: (target) => this.applyLiveModelSwitch(target),
+      applyModeSwitch: (mode) => this.applyModeSwitch(mode),
       startFreshTurn: (input) => this.startFreshTurn(input),
+      handleEditUserQuery: (commandId, clientId, payload, inputOrigin) =>
+        this.handleEditUserQuery(commandId, clientId, payload, inputOrigin),
       handleDeleteSession: (commandId) => this.handleDeleteSession(commandId),
     };
   }
 
-  private async startFreshTurn(input: {
-    commandId: string;
-    clientId: string;
-    text: string;
-    modelSelection?: ModelSelection | undefined;
-    inputOrigin?: "desktop" | "mobile" | undefined;
-  }): Promise<CommandAck> {
+  private async applyModeSwitch(requestedMode: string): Promise<void> {
+    const normalizedMode = normalizePiExecutionMode(requestedMode);
+    const prev = this.projector.getSnapshot().config;
+    if (prev.mode !== normalizedMode) {
+      this.broadcastCommit(this.projector.applyConfigUpdate({ ...prev, mode: normalizedMode }));
+    }
+    // Pi 工具白名单（--tools）属于进程启动参数：空闲状态下若模式已变更，优雅关闭旧进程，
+    // 下次提问时自动按新模式（标准 / 只读）并以同一 sessionFile 无缝重启。
+    if (
+      this.client?.alive &&
+      this.activeClientMode !== normalizedMode &&
+      !isSessionRunningPhase(this.projector.getSnapshot().control.phase)
+    ) {
+      await this.closeClientAndWait();
+    }
+  }
+
+  private async handleEditUserQuery(
+    commandId: string,
+    clientId: string,
+    payload: CommandPayloadMap["editUserQuery"],
+    inputOrigin?: "desktop" | "mobile" | undefined,
+  ): Promise<CommandAck> {
+    const targetInfo = this.projector.findUserRowInfo(payload.target.rowId);
+    if (!targetInfo) {
+      return createCommandAck({
+        commandId,
+        status: "rejected",
+        revisionAtDecision: this.projector.getRevision(),
+        reasonCode: "proto.targetRowNotFound",
+        message: "Target user message not found for edit",
+      });
+    }
+
+    // 先停止活跃 Pi 进程，防止其 session_shutdown 写回旧叶子造成断链。
+    if (isSessionRunningPhase(this.projector.getSnapshot().control.phase) && this.client?.alive) {
+      await this.client.clearQueue().catch(() => {});
+      await this.client.abort().catch(() => {});
+    }
+    await this.closeClientAndWait();
+    let rewoundFromDisk = false;
+    if (this.piSessionFile) {
+      try {
+        const hydrated = await rewindPiSessionFileBeforeOrdinal({
+          filePath: this.piSessionFile,
+          sessionId: this.sessionId,
+          cwd: this.cwd,
+          userOrdinal: targetInfo.userOrdinal,
+          catalog: this.catalog,
+        });
+        if (hydrated) {
+          this.reloadFromHydratedDisk(this.piSessionFile, hydrated);
+          rewoundFromDisk = true;
+        }
+      } catch (error) {
+        logger.warn(undefined, `Pi editUserQuery 磁盘回退失败: ${formatRedactedPiError(error)}`);
+      }
+    }
+    if (!rewoundFromDisk) {
+      this.projector.rewindInMemoryBeforeRow(payload.target.rowId, `pi-${randomUUID()}`);
+      for (const sub of this.subscriptions.values())
+        this.emitSnapshotToSubscription(sub, "recovery");
+      if (this.publishedToIndex) this.callbacks.onSessionPublishedOrUpdated(this.getSummary());
+    }
+    const effectiveMode =
+      payload.planEnabled === true
+        ? "plan"
+        : payload.mode
+          ? normalizePiExecutionMode(payload.mode)
+          : undefined;
+    if (effectiveMode) await this.applyModeSwitch(effectiveMode);
+    const startAck = await this.startFreshTurn(
+      {
+        commandId,
+        clientId,
+        text: payload.newText,
+        attachments:
+          payload.attachments !== undefined ? payload.attachments : targetInfo.row.attachments,
+        conversationQuotes:
+          payload.conversationQuotes !== undefined
+            ? payload.conversationQuotes
+            : targetInfo.row.conversationQuotes,
+        modelSelection: payload.modelSelection ?? targetInfo.row.modelSelection,
+        inputOrigin,
+      },
+      { nonBlocking: true },
+    );
+    if (startAck.status !== "accepted") return startAck;
+    return createCommandAck({
+      commandId,
+      status: "accepted",
+      revisionAtDecision: this.projector.getRevision(),
+      result: { type: "editUserQuery", disposition: "rewind", sessionId: this.sessionId },
+    });
+  }
+
+  private async startFreshTurn(
+    input: {
+      commandId: string;
+      clientId: string;
+      text: string;
+      attachments?: UserInputRow["attachments"] | undefined;
+      conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
+      modelSelection?: ModelSelection | undefined;
+      inputOrigin?: "desktop" | "mobile" | undefined;
+    },
+    options?: { readonly nonBlocking?: boolean | undefined },
+  ): Promise<CommandAck> {
     this.publishedToIndex = true;
     this.applyRequestedModelSelection(input.modelSelection);
 
@@ -331,42 +472,73 @@ export class PiSessionController {
         commandId: input.commandId,
         clientId: input.clientId,
         text: input.text,
+        attachments: input.attachments,
+        conversationQuotes: input.conversationQuotes,
         nowMs: Date.now(),
         modelSelection: input.modelSelection,
         inputOrigin: input.inputOrigin,
       }),
     );
 
-    try {
-      const initialClient = await this.ensureClient();
-      const activeClient = await this.syncModelConfigToClient(initialClient);
-      const seqBefore = this.projector.getAgentLifecycleSeq();
-      const ack = await activeClient.prompt(input.text);
-      if (ack?.disposition === "handled") {
-        this.broadcastCommit(this.projector.completeHandledPrompt(Date.now()));
-      } else {
-        this.broadcastCommit(
-          this.projector.applyOptimisticRunningIfUnchanged(seqBefore, Date.now()),
-        );
+    const dispatchToPi = async (): Promise<CommandAck> => {
+      try {
+        const initialClient = await this.ensureClient();
+        if (this.disposed || this.projector.getSnapshot().control.stopState === "stopping") {
+          return createCommandAck({
+            commandId: input.commandId,
+            status: "accepted",
+            revisionAtDecision: this.projector.getRevision(),
+            result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
+          });
+        }
+        const activeClient = await this.syncModelConfigToClient(initialClient);
+        const seqBefore = this.projector.getAgentLifecycleSeq();
+        const ack = await activeClient.prompt(input.text);
+        if (ack?.disposition === "handled") {
+          this.broadcastCommit(this.projector.completeHandledPrompt(Date.now()));
+        } else {
+          this.broadcastCommit(
+            this.projector.applyOptimisticRunningIfUnchanged(seqBefore, Date.now()),
+          );
+        }
+        return createCommandAck({
+          commandId: input.commandId,
+          status: "accepted",
+          revisionAtDecision: this.projector.getRevision(),
+          result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
+        });
+      } catch (error) {
+        const redacted = formatRedactedPiError(error);
+        logger.warn(undefined, `Pi prompt 执行失败 session=${this.sessionId}: ${redacted}`);
+        if (!this.disposed) {
+          this.broadcastCommit(this.projector.failActiveTurn(redacted, Date.now(), "runtime"));
+        }
+        return createCommandAck({
+          commandId: input.commandId,
+          status: "failed",
+          revisionAtDecision: this.projector.getRevision(),
+          reasonCode: "fault.pi.promptFailed",
+          message: redacted,
+        });
       }
+    };
+
+    if (options?.nonBlocking) {
+      const pending = dispatchToPi()
+        .then(() => undefined)
+        .finally(() => {
+          if (this.inFlightPromptDispatch === pending) this.inFlightPromptDispatch = null;
+        });
+      this.inFlightPromptDispatch = pending;
       return createCommandAck({
         commandId: input.commandId,
         status: "accepted",
         revisionAtDecision: this.projector.getRevision(),
         result: { type: "inputAccepted", delivery: "startNow", inputId: input.commandId },
       });
-    } catch (error) {
-      const redacted = formatRedactedPiError(error);
-      logger.warn(undefined, `Pi prompt 执行失败 session=${this.sessionId}: ${redacted}`);
-      this.broadcastCommit(this.projector.failActiveTurn(redacted, Date.now(), "runtime"));
-      return createCommandAck({
-        commandId: input.commandId,
-        status: "failed",
-        revisionAtDecision: this.projector.getRevision(),
-        reasonCode: "fault.pi.promptFailed",
-        message: redacted,
-      });
     }
+
+    return dispatchToPi();
   }
 
   private async handleDeleteSession(commandId: string): Promise<CommandAck> {
@@ -389,6 +561,7 @@ export class PiSessionController {
     // 先同步占位 spawnPromise 再 await discoverPi，防止并发调用或关闭期间 discoverPi 竞态泄漏双进程。
     const promise = (async () => {
       const config = this.projector.getSnapshot().config;
+      const executionMode = normalizePiExecutionMode(config.mode);
       const spawned = await spawnConfiguredPiClient({
         sessionId: this.sessionId,
         cwd: this.cwd,
@@ -399,8 +572,10 @@ export class PiSessionController {
         provider: override?.provider ?? config.provider,
         model: override?.model ?? config.model,
         thought: override?.thought ?? config.thought,
+        mode: executionMode,
         isDisposed: () => this.disposed,
       });
+      this.activeClientMode = executionMode;
       if (spawned.sessionFile) this.piSessionFile = spawned.sessionFile;
       this.attachClient(spawned.client);
       await this.hydrateFromClientState(spawned.client);
@@ -542,7 +717,14 @@ export class PiSessionController {
       const trimmed = event.level.trim();
       if (trimmed) this.activeClientThinking = trimmed;
     }
+    if (event.type === "extension_ui_request") {
+      applyPiExtensionUiEvent(this.sessionId, event, Date.now());
+    }
     this.broadcastCommit(this.projector.applyPiEvent(event, Date.now()));
+    const dirtySubagents = this.projector.drainDirtyVirtualSubagentSessions();
+    if (dirtySubagents.length > 0) {
+      this.callbacks.onVirtualSubagentSessionsUpdated?.(dirtySubagents);
+    }
   }
 
   private handlePiExit(exitedClient: PiRpcClient, info: PiRpcExitInfo): void {
@@ -570,6 +752,7 @@ export class PiSessionController {
     const client = this.client;
     this.detachClientListeners();
     this.client = null;
+    clearPiSessionExtensionUiState(this.sessionId);
     if (client) await client.closeAndWait(3_000).catch(() => {});
   }
 

@@ -70,6 +70,25 @@ interface UseModelProviderNavigationOptions {
   intl: ReturnType<typeof useZCodeIntl>["intl"];
 }
 
+const LEGACY_ZCODE_COMMERCIAL_PROVIDER_IDS = new Set([
+  "zcode",
+  "zcode-start",
+  "zcode-coding-plan",
+  "bigmodel-coding-plan",
+  "bigmodel-team-coding-plan",
+  "bigmodel-start-plan",
+  "zai-coding-plan",
+  "zai-team-coding-plan",
+  "zai-start-plan",
+]);
+
+function isLegacyZCodeCommercialProvider(provider: ProviderSettingsFormProvider): boolean {
+  const id = provider.providerId.trim().toLowerCase();
+  if (LEGACY_ZCODE_COMMERCIAL_PROVIDER_IDS.has(id)) return true;
+  if (provider.config.access?.type === "zhipu-account") return true;
+  return false;
+}
+
 export function useModelProviderNavigation({
   presetProviders,
   modelProviders,
@@ -93,11 +112,13 @@ export function useModelProviderNavigation({
 }: UseModelProviderNavigationOptions) {
   const customProviders = useMemo(() => {
     const allCustomProviders = modelProviders.filter(
-      (provider) => provider.config.group === "standard-personal",
+      (provider) =>
+        provider.config.group === "standard-personal" &&
+        (!hideOfficialPlanItems || !isLegacyZCodeCommercialProvider(provider)),
     );
     // 这里复用模型菜单的展示排序，确保设置页和聊天框供应商顺序一致。
     return sortModelProvidersForDisplay(allCustomProviders, displayOrder);
-  }, [displayOrder, modelProviders]);
+  }, [displayOrder, hideOfficialPlanItems, modelProviders]);
 
   const codingPlanItems = useMemo(
     () =>
@@ -113,53 +134,53 @@ export function useModelProviderNavigation({
               availableFamilies,
             ),
           ).map((spec) => {
-        const provider = modelProviders.find((item) => item.providerId === spec.id) ?? null;
-        const accountEntitled = entitledAccountProviderIds.has(spec.id);
-        const entitlementProvider = pickCodingPlanEntitlementProvider(provider);
-        const entitlement = codingPlanEntitlements[spec.id];
-        const state = resolveCodingPlanEntitlementState({
-          providerId: spec.id,
-          accountEntitled,
-          accountAvailability: provider?.accountState?.availability,
-          accountUnavailableReason: provider?.accountState?.unavailableReason,
-          entitlement,
-          modelProvidersLoading,
-        });
+            const provider = modelProviders.find((item) => item.providerId === spec.id) ?? null;
+            const accountEntitled = entitledAccountProviderIds.has(spec.id);
+            const entitlementProvider = pickCodingPlanEntitlementProvider(provider);
+            const entitlement = codingPlanEntitlements[spec.id];
+            const state = resolveCodingPlanEntitlementState({
+              providerId: spec.id,
+              accountEntitled,
+              accountAvailability: provider?.accountState?.availability,
+              accountUnavailableReason: provider?.accountState?.unavailableReason,
+              entitlement,
+              modelProvidersLoading,
+            });
 
-        return {
-          key: createCodingPlanProviderNodeKey(spec.id),
-          type: "codingPlan" as const,
-          presetId: spec.id,
-          oauthProviderId: spec.oauthProviderId,
-          label: isStartPlanModelProviderId(spec.id)
-            ? "Start Plan"
-            : `${spec.providerName} - ${intl.formatMessage({
-                id: "settings.modelProvider.connectionMode.codingPlan",
-              })}`,
-          providerName: spec.providerName,
-          provider: entitlementProvider,
-          accountEntitled,
-          status: state.status,
-          statusLabelId: state.statusLabelId,
-          ...(isStartPlanModelProviderId(spec.id) &&
-          entitlement?.snapshot?.unavailableReason === "not_authenticated"
-            ? {
-                accountLoginRequired: true,
-                statusLabelId: "settings.modelProvider.startPlan.status.loginExpired",
-              }
-            : {}),
-          planLevel: state.planLevel,
-          currentProductId: state.currentProductId,
-          subscriptionBillingCycle: state.subscriptionBillingCycle,
-          subscriptionRenewTime: state.subscriptionRenewTime,
-          subscriptionExpireTime: state.subscriptionExpireTime,
-          subscriptionDetails: state.subscriptionDetails,
-          quotaLimits: state.quotaLimits,
-          mcpQuotaLimit: state.mcpQuotaLimit ?? null,
-          purchaseUrl: spec.purchaseUrl,
-          statusActive: entitlementProvider?.executable === true,
-        };
-      }),
+            return {
+              key: createCodingPlanProviderNodeKey(spec.id),
+              type: "codingPlan" as const,
+              presetId: spec.id,
+              oauthProviderId: spec.oauthProviderId,
+              label: isStartPlanModelProviderId(spec.id)
+                ? "Start Plan"
+                : `${spec.providerName} - ${intl.formatMessage({
+                    id: "settings.modelProvider.connectionMode.codingPlan",
+                  })}`,
+              providerName: spec.providerName,
+              provider: entitlementProvider,
+              accountEntitled,
+              status: state.status,
+              statusLabelId: state.statusLabelId,
+              ...(isStartPlanModelProviderId(spec.id) &&
+              entitlement?.snapshot?.unavailableReason === "not_authenticated"
+                ? {
+                    accountLoginRequired: true,
+                    statusLabelId: "settings.modelProvider.startPlan.status.loginExpired",
+                  }
+                : {}),
+              planLevel: state.planLevel,
+              currentProductId: state.currentProductId,
+              subscriptionBillingCycle: state.subscriptionBillingCycle,
+              subscriptionRenewTime: state.subscriptionRenewTime,
+              subscriptionExpireTime: state.subscriptionExpireTime,
+              subscriptionDetails: state.subscriptionDetails,
+              quotaLimits: state.quotaLimits,
+              mcpQuotaLimit: state.mcpQuotaLimit ?? null,
+              purchaseUrl: spec.purchaseUrl,
+              statusActive: entitlementProvider?.executable === true,
+            };
+          }),
     [
       entitledAccountProviderIds,
       codingPlanEntitlements,
@@ -200,56 +221,61 @@ export function useModelProviderNavigation({
   );
 
   const navigationGroups = useMemo<ModelProviderNavGroup[]>(() => {
-    const groups: ModelProviderNavGroup[] = [
-      {
+    const presetItems: ModelProviderNavGroup["items"] = [
+      ...presetProviders.map(({ id, displayName, provider }) => {
+        const statusProvider = resolvePresetFamilyStatusProvider({
+          presetId: id,
+          provider,
+          connectionModeItems: connectionModeCodingPlanItems,
+          connectionSelections,
+          modelProviders,
+        });
+        return {
+          key: createPresetProviderNodeKey(id),
+          type: "preset" as const,
+          presetId: id,
+          label: displayName,
+          logo: modelProviders.find(
+            (candidate) =>
+              candidate.providerId ===
+              resolveModelProviderFamilySpecByProviderId(id)?.individualCodingPlanProviderId,
+          )?.config.logo,
+          provider,
+          displayName,
+          statusProvider,
+          statusActive: statusProvider?.executable === true,
+        };
+      }),
+      ...codingPlanItems.filter((item) => isStartPlanModelProviderId(item.presetId)),
+    ];
+
+    const groups: ModelProviderNavGroup[] = [];
+    // Pi Zero 下 hideOfficialPlanItems=true 且无官方预置项时，不再渲染空的「智谱 / 官方订阅」遗留分组。
+    if (!hideOfficialPlanItems || presetItems.length > 0) {
+      groups.push({
         id: "preset",
         title: intl.formatMessage({ id: "settings.modelProvider.presetTitle" }),
-        items: [
-          ...presetProviders.map(({ id, displayName, provider }) => {
-            const statusProvider = resolvePresetFamilyStatusProvider({
-              presetId: id,
-              provider,
-              connectionModeItems: connectionModeCodingPlanItems,
-              connectionSelections,
-              modelProviders,
-            });
-            return {
-              key: createPresetProviderNodeKey(id),
-              type: "preset" as const,
-              presetId: id,
-              label: displayName,
-              logo: modelProviders.find(
-                (candidate) =>
-                  candidate.providerId ===
-                  resolveModelProviderFamilySpecByProviderId(id)?.individualCodingPlanProviderId,
-              )?.config.logo,
-              provider,
-              displayName,
-              statusProvider,
-              statusActive: statusProvider?.executable === true,
-            };
-          }),
-          ...codingPlanItems.filter((item) => isStartPlanModelProviderId(item.presetId)),
-        ],
-      },
-      {
-        id: "custom",
-        title: intl.formatMessage({ id: "settings.modelProvider.customTitle" }),
-        items: customProviders.map((provider) => ({
-          key: createCustomProviderNodeKey(provider.providerId),
-          type: "custom" as const,
-          label: getProviderFormLabel(provider),
-          provider,
-          statusActive: provider.executable === true,
-        })),
-      },
-    ];
+        items: presetItems,
+      });
+    }
+    groups.push({
+      id: "custom",
+      title: intl.formatMessage({ id: "settings.modelProvider.customTitle" }),
+      items: customProviders.map((provider) => ({
+        key: createCustomProviderNodeKey(provider.providerId),
+        type: "custom" as const,
+        label: getProviderFormLabel(provider),
+        provider,
+        statusActive: provider.executable === true,
+      })),
+    });
 
     return groups;
   }, [
     customProviders,
     codingPlanItems,
     connectionModeCodingPlanItems,
+    hideOfficialPlanItems,
     // 左侧导航分组标题在这个 memo 内格式化。
     // 语言切换时 provider/权益引用可能不变，必须依赖 intl 才能刷新旧 locale 的文案。
     intl,

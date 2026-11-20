@@ -66,6 +66,7 @@ export function useBottomFollowingScroll(active: boolean, contentVersion: unknow
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const followingRef = useRef(true);
+  const rafIdRef = useRef<number | null>(null);
   const [mask, setMask] = useState<ScrollMaskState>(EMPTY_SCROLL_MASK_STATE);
   const updateMask = useCallback(() => {
     const el = scrollRef.current;
@@ -76,11 +77,28 @@ export function useBottomFollowingScroll(active: boolean, contentVersion: unknow
         : next,
     );
   }, []);
-  const sync = useCallback(() => {
+  const syncNow = useCallback(() => {
     const el = scrollRef.current;
-    if (el && followingRef.current) el.scrollTop = el.scrollHeight;
+    if (el && followingRef.current) {
+      const targetTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (Math.abs(el.scrollTop - targetTop) > 1) {
+        el.scrollTop = targetTop;
+      }
+    }
     updateMask();
   }, [updateMask]);
+  // 折叠/展开高度动画期间 ResizeObserver 会高频触发，按帧合并到单次 rAF 避免同步重排掉帧。
+  const scheduleSync = useCallback(() => {
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+      syncNow();
+      return;
+    }
+    if (rafIdRef.current !== null) return;
+    rafIdRef.current = window.requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      syncNow();
+    });
+  }, [syncNow]);
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -89,21 +107,38 @@ export function useBottomFollowingScroll(active: boolean, contentVersion: unknow
   }, [updateMask]);
   useEffect(() => {
     if (!active) {
+      if (rafIdRef.current !== null) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
       followingRef.current = true;
       setMask(EMPTY_SCROLL_MASK_STATE);
       return;
     }
-    sync();
+    scheduleSync();
     const el = scrollRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(sync);
+    if (!el || typeof ResizeObserver === "undefined") {
+      return () => {
+        if (rafIdRef.current !== null) {
+          window.cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+      };
+    }
+    const observer = new ResizeObserver(scheduleSync);
     observer.observe(el);
     if (contentRef.current) observer.observe(contentRef.current);
-    return () => observer.disconnect();
-  }, [active, sync]);
+    return () => {
+      observer.disconnect();
+      if (rafIdRef.current !== null) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, [active, scheduleSync]);
   useEffect(() => {
-    if (active) sync();
-  }, [active, contentVersion, sync]);
+    if (active) scheduleSync();
+  }, [active, contentVersion, scheduleSync]);
   const maskData = mask.showTop
     ? mask.showBottom
       ? "both"

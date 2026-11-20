@@ -27,6 +27,7 @@ import {
   discoverPi,
   encodePiSessionBucketDir,
   formatRedactedPiError,
+  getPiSessionExtensionUiSnapshot,
   registerActivePiProcess,
   unregisterActivePiProcess,
   type DisposablePiProcess,
@@ -249,6 +250,12 @@ export async function executePiSessionEcosystemAction(
     agentService?: PiAgentService | undefined;
   },
 ): Promise<PiSessionEcosystemResult> {
+  if (op.op === "getExtensionUiState") {
+    return {
+      op: "getExtensionUiState",
+      state: getPiSessionExtensionUiSnapshot(op.sessionId),
+    };
+  }
   if (op.op === "btw") {
     const result = await runPiBtwQuestion(op.request, {
       env: deps.env,

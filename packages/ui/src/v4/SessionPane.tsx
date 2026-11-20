@@ -334,11 +334,8 @@ import {
   parseSelectionSideSlashCommand,
   type V4VisibleSlashCommand,
 } from "@/v4/slashCommands.js";
-import {
-  parsePiLocalSlashCommand,
-  PiConversationFloatingActions,
-  PiConversationOverlays,
-} from "@/pi-conversation/index.js";
+import { parsePiLocalSlashCommand, PiConversationOverlays } from "@/pi-conversation/index.js";
+import { usePiSubagentPreferences } from "@/settings/pi/index.js";
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
@@ -2659,6 +2656,38 @@ export function SessionPane({
     },
     [onOpenSubagentSession, remoteSessionId, rootSessionId, workspaceIdentity, workspacePath],
   );
+  const piSubagentPrefs = usePiSubagentPreferences();
+  const autoOpenedSubagentIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    autoOpenedSubagentIdsRef.current.clear();
+  }, [sessionId]);
+  useEffect(() => {
+    if (readOnly || !sessionId || !onOpenSubagentSession || !piSubagentPrefs.autoOpenSidePane) {
+      return;
+    }
+    const running = snapshot?.subagents?.running;
+    if (!running || running.length === 0) return;
+    for (const item of running) {
+      if (autoOpenedSubagentIdsRef.current.has(item.childSessionId)) continue;
+      autoOpenedSubagentIdsRef.current.add(item.childSessionId);
+      handleOpenSubagentSession({
+        rootSessionId: rootSessionId ?? sessionId,
+        parentSessionId: sessionId,
+        childSessionId: item.childSessionId,
+        subagentType: item.subagentType,
+        title: item.title,
+      });
+    }
+  }, [
+    handleOpenSubagentSession,
+    onOpenSubagentSession,
+    piSubagentPrefs.autoOpenSidePane,
+    readOnly,
+    rootSessionId,
+    sessionId,
+    snapshot?.subagents?.running,
+  ]);
+
   const handleOpenSubagentDirectory = useCallback(
     (request: import("@/lib/workspaceSidePane.js").OpenSubagentDirectorySideTabRequest) => {
       if (compactForRemoteControl) return;
@@ -6748,23 +6777,6 @@ export function SessionPane({
           onClosePane={onClosePane}
           workspaceBadge={workspaceBadge}
         />
-        {!readOnly ? (
-          // 放在对话区左上角（z-30），避开右上角 ConversationStatusPanel（更改/状态浮条）的点击区域；
-          // 分屏带有 workspaceBadge / onClosePane 时自动下移避让。
-          <div
-            className={cn(
-              "pointer-events-none absolute left-3 z-30 flex items-center",
-              workspaceBadge || onClosePane ? "top-11" : "top-2",
-            )}
-          >
-            <PiConversationFloatingActions
-              hasSession={Boolean(sessionId)}
-              onOpenBtw={() => handlePiBtwOpenChange(true)}
-              onOpenTree={() => setPiTreeOpen(true)}
-              onExportHtml={() => void handlePiExportHtml()}
-            />
-          </div>
-        ) : null}
 
         <div
           ref={conversationLayoutContainerRef}

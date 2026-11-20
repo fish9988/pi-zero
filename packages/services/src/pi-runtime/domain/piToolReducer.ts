@@ -17,10 +17,139 @@ import {
   parseMcpToolIdentity,
 } from "#src/pi-runtime/domain/piToolMapper.js";
 import {
+  buildPiSubagentToolInput,
+  buildSubagentChildSessionId,
+  buildSubagentDirectoryProjection,
+  buildSubagentRow,
+  buildVirtualSubagentSessionPayload,
+  isPiSubagentToolName,
+  mapSubagentItemStatusToRowStatus,
+  parsePiSubagentArgs,
+  parsePiSubagentDetails,
+  type PiSubagentItemStatus,
+} from "#src/pi-runtime/domain/piSubagentProjector.js";
+import {
   closeOpenStreamingRows,
   type PiProjectorRuntimeState,
   type PiTrackedToolCall,
 } from "#src/pi-runtime/domain/piTurnSettlement.js";
+
+function projectSubagentToolLifecycle(
+  state: PiProjectorRuntimeState,
+  input: {
+    turnId: string;
+    toolCallId: string;
+    rawArgs: unknown;
+    details: unknown;
+    fallbackOutputText?: string | undefined;
+    fallbackStatus: PiSubagentItemStatus;
+    startedAt: number;
+    endedAt?: number | undefined;
+    nowMs: number;
+    deltas: ConversationDelta[];
+  },
+): Record<string, unknown> {
+  const fromDetails = parsePiSubagentDetails(input.details, input.fallbackStatus);
+  const run = fromDetails ?? parsePiSubagentArgs(input.rawArgs, input.fallbackStatus);
+  const outcomes =
+    run.results.length > 0
+      ? run.results
+      : [
+          {
+            agent: "subagent",
+            agentSource: "unknown",
+            task: "",
+            status: input.fallbackStatus,
+            messages: [],
+          },
+        ];
+
+  state.subagentRevision += 1;
+  const parentSessionId = state.snapshot.sessionId;
+
+  outcomes.forEach((outcome, index) => {
+    const childSessionId = buildSubagentChildSessionId(
+      parentSessionId,
+      input.toolCallId,
+      index,
+      outcomes.length,
+    );
+    const prevPayload = state.subagentSessionsByChildId.get(childSessionId);
+    const effectiveStartedAt = prevPayload?.startedAt ?? input.startedAt;
+    const effectiveStatus: PiSubagentItemStatus =
+      input.endedAt !== undefined && (outcome.status === "pending" || outcome.status === "running")
+        ? input.fallbackStatus
+        : outcome.status;
+    const finalOutcome =
+      effectiveStatus === outcome.status ? outcome : { ...outcome, status: effectiveStatus };
+    const rowStatus = mapSubagentItemStatusToRowStatus(effectiveStatus);
+    const effectiveEndedAt =
+      rowStatus === "running" ? undefined : (prevPayload?.endedAt ?? input.endedAt ?? input.nowMs);
+
+    const virtualPayload = buildVirtualSubagentSessionPayload({
+      parentSessionId,
+      childSessionId,
+      toolCallId: input.toolCallId,
+      workspacePath: state.workspacePath,
+      outcome: finalOutcome,
+      fallbackOutputText: outcomes.length === 1 ? input.fallbackOutputText : undefined,
+      startedAt: effectiveStartedAt,
+      endedAt: effectiveEndedAt,
+      nowMs: input.nowMs,
+      revision: state.subagentRevision,
+      logEpoch: `pi-sub-${parentSessionId}`,
+    });
+    state.subagentSessionsByChildId.set(childSessionId, virtualPayload);
+    state.dirtySubagentChildIds.add(childSessionId);
+
+    const existingSubagentRowId = state.subagentRowIdByChildId.get(childSessionId);
+    if (existingSubagentRowId !== undefined) {
+      const existingRow = state.getRowById(existingSubagentRowId);
+      if (existingRow && existingRow.kind === "subagent") {
+        input.deltas.push({
+          op: "row.upserted",
+          row: {
+            ...existingRow,
+            subagentType: virtualPayload.subagentType,
+            status: virtualPayload.status,
+            summaryText: virtualPayload.summary,
+            ...(typeof effectiveEndedAt === "number" ? { endedAt: effectiveEndedAt } : {}),
+          },
+        });
+      }
+    } else {
+      const subagentRowId = allocateRowId(state);
+      state.subagentRowIdByChildId.set(childSessionId, subagentRowId);
+      input.deltas.push({
+        op: "row.appended",
+        row: buildSubagentRow({
+          rowId: subagentRowId,
+          turnId: input.turnId,
+          createdAt: effectiveStartedAt,
+          createdAtSeq: state.snapshot.seq + input.deltas.length + 1,
+          parentToolCallId: input.toolCallId,
+          subagentType: virtualPayload.subagentType,
+          status: virtualPayload.status,
+          summaryText: virtualPayload.summary,
+          childSessionId,
+          startedAt: effectiveStartedAt,
+          endedAt: effectiveEndedAt,
+        }),
+      });
+    }
+  });
+
+  const directory = buildSubagentDirectoryProjection(
+    Array.from(state.subagentSessionsByChildId.values()),
+    state.subagentRevision,
+  );
+  input.deltas.push({
+    op: "state.updated",
+    patch: { subagents: directory.state },
+  });
+
+  return buildPiSubagentToolInput(input.rawArgs, run);
+}
 
 function allocateRowId(state: PiProjectorRuntimeState): number {
   state.nextRowId += 1;
@@ -260,6 +389,7 @@ export function reduceToolExecutionEvent(
     const rawArgs = event.args ?? {};
     const serializedArgs = JSON.stringify(rawArgs);
     const tracked = state.toolCallsByCallId.get(event.toolCallId);
+    const isSubagent = isPiSubagentToolName(event.toolName);
     if (!tracked) {
       createAndTrackToolCall(state, {
         turnId,
@@ -272,6 +402,18 @@ export function reduceToolExecutionEvent(
         nowMs,
         deltas,
       });
+      if (isSubagent) {
+        projectSubagentToolLifecycle(state, {
+          turnId,
+          toolCallId: event.toolCallId,
+          rawArgs,
+          details: undefined,
+          fallbackStatus: "running",
+          startedAt: nowMs,
+          nowMs,
+          deltas,
+        });
+      }
       return;
     }
     const canonicalInput = normalizePiToolInput(event.toolName, rawArgs, state.workspacePath);
@@ -292,12 +434,50 @@ export function reduceToolExecutionEvent(
         },
       });
     }
+    if (isSubagent) {
+      projectSubagentToolLifecycle(state, {
+        turnId,
+        toolCallId: event.toolCallId,
+        rawArgs,
+        details: undefined,
+        fallbackStatus: "running",
+        startedAt: nowMs,
+        nowMs,
+        deltas,
+      });
+    }
     return;
   }
 
   if (event.type === "tool_execution_update") {
     const tracked = state.toolCallsByCallId.get(event.toolCallId);
     if (!tracked) return;
+    if (isPiSubagentToolName(tracked.rawToolName)) {
+      const updatedInput = projectSubagentToolLifecycle(state, {
+        turnId,
+        toolCallId: event.toolCallId,
+        rawArgs: tracked.rawArgs,
+        details: event.partialResult?.details,
+        fallbackOutputText: extractPiToolResultText(event.partialResult),
+        fallbackStatus: "running",
+        startedAt: tracked.startedAt ?? nowMs,
+        nowMs,
+        deltas,
+      });
+      tracked.canonicalInput = updatedInput;
+      const existingRow = state.getRowById(tracked.rowId);
+      if (existingRow && existingRow.kind === "toolCall") {
+        deltas.push({
+          op: "row.upserted",
+          row: {
+            ...existingRow,
+            status: "running",
+            input: updatedInput,
+          },
+        });
+      }
+      return;
+    }
     if (tracked.canonicalToolName !== "Bash") return;
     const existingRow = state.getRowById(tracked.rowId);
     if (
@@ -378,6 +558,22 @@ export function reduceToolExecutionEvent(
   }
 
   const existingRow = state.getRowById(existingTracked.rowId);
+  let finalInput = existingTracked.canonicalInput;
+  if (isPiSubagentToolName(rawToolName)) {
+    finalInput = projectSubagentToolLifecycle(state, {
+      turnId,
+      toolCallId: event.toolCallId,
+      rawArgs: existingTracked.rawArgs,
+      details: event.result?.details,
+      fallbackOutputText: extractPiToolResultText(event.result),
+      fallbackStatus: event.isError ? "failed" : "done",
+      startedAt: existingTracked.startedAt ?? fallbackStartedAt,
+      endedAt: nowMs,
+      nowMs,
+      deltas,
+    });
+    existingTracked.canonicalInput = finalInput;
+  }
   if (existingRow && existingRow.kind === "toolCall") {
     const { outputPreview: _preview, progress: _progress, error: _prevErr, ...rest } = existingRow;
     deltas.push({
@@ -387,6 +583,7 @@ export function reduceToolExecutionEvent(
         status: event.isError ? "error" : "success",
         startedAt: rest.startedAt ?? fallbackStartedAt,
         endedAt: nowMs,
+        ...(finalInput !== undefined ? { input: finalInput } : {}),
         output: built.output,
         ...(built.error ? { error: built.error } : {}),
       },

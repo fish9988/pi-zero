@@ -77,9 +77,13 @@ export function buildUserInputRow(input: {
   commandId: string;
   clientId: string;
   guided?: true | undefined;
+  canEdit?: boolean | undefined;
+  attachments?: UserInputRow["attachments"] | undefined;
+  conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
   modelSelection?: ModelSelection | undefined;
   inputOrigin?: "desktop" | "mobile" | undefined;
 }): UserInputRow {
+  const editable = input.canEdit ?? !input.guided;
   return {
     kind: "userInput",
     rowId: input.rowId,
@@ -91,6 +95,13 @@ export function buildUserInputRow(input: {
     createdAtSeq: input.createdAtSeq,
     ...(input.inputOrigin ? { inputOrigin: input.inputOrigin } : {}),
     ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+    ...(input.attachments && input.attachments.length > 0
+      ? { attachments: input.attachments }
+      : {}),
+    ...(input.conversationQuotes && input.conversationQuotes.length > 0
+      ? { conversationQuotes: input.conversationQuotes }
+      : {}),
+    ...(editable ? { actions: { canEdit: true as const } } : {}),
     text: input.text,
     origin: "realUser",
     ...(input.guided ? { guided: true as const } : {}),

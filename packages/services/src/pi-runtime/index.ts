@@ -112,3 +112,11 @@ export {
 } from "#src/pi-runtime/adapters/piModelCatalog.js";
 
 export { createPiAgentService } from "#src/pi-runtime/adapters/piAgentService.js";
+
+export {
+  applyPiExtensionUiEvent,
+  clearPiSessionExtensionUiState,
+  getPiSessionExtensionUiSnapshot,
+  stripAnsiSequences,
+  subscribePiExtensionUiState,
+} from "#src/pi-runtime/adapters/piExtensionUiStateStore.js";

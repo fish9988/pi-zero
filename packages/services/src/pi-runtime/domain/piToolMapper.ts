@@ -34,6 +34,10 @@ const CANONICAL_TOOL_NAME_MAP: Readonly<Record<string, string>> = {
   grep: "Grep",
   find: "Glob",
   ls: "Glob",
+  subagent: "Agent",
+  task: "Agent",
+  agent: "Agent",
+  invoke_subagent: "Agent",
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -215,6 +219,58 @@ export function normalizePiToolInput(
       parsed_cmd: [{ type: "list_files" }],
       cwd,
       ...(path ? { path } : {}),
+    };
+  }
+
+  if (
+    lower === "subagent" ||
+    lower === "task" ||
+    lower === "agent" ||
+    lower === "invoke_subagent"
+  ) {
+    if (!args) return { subagent_type: "subagent", description: "Subagent" };
+    const parallelTasks = Array.isArray(args["tasks"]) ? args["tasks"] : null;
+    const chainSteps = Array.isArray(args["chain"]) ? args["chain"] : null;
+    if (parallelTasks && parallelTasks.length > 0) {
+      const first = isPlainRecord(parallelTasks[0]) ? parallelTasks[0] : undefined;
+      const firstAgent =
+        (first && readTrimmedString(first, ["agent", "subagent_type"])) || "parallel";
+      const names = parallelTasks
+        .map((item) =>
+          isPlainRecord(item) ? readTrimmedString(item, ["agent", "subagent_type"]) : undefined,
+        )
+        .filter((name): name is string => Boolean(name))
+        .join(", ");
+      return {
+        ...args,
+        subagent_type: firstAgent,
+        description: `并行 ${parallelTasks.length} 个子代理${names ? ` · ${names}` : ""}`,
+      };
+    }
+    if (chainSteps && chainSteps.length > 0) {
+      const first = isPlainRecord(chainSteps[0]) ? chainSteps[0] : undefined;
+      const firstAgent = (first && readTrimmedString(first, ["agent", "subagent_type"])) || "chain";
+      const firstTask = first
+        ? readTrimmedString(first, ["task", "prompt", "description"])
+        : undefined;
+      return {
+        ...args,
+        subagent_type: firstAgent,
+        description: `链式 ${chainSteps.length} 步${firstTask ? ` · ${firstTask.slice(0, 64)}` : ""}`,
+      };
+    }
+    const agentName =
+      readTrimmedString(args, ["agent", "subagent_type", "subagentType", "role"]) ?? "subagent";
+    const task = readTrimmedString(args, ["task", "prompt", "description"]);
+    const firstLine = task
+      ?.split(/\r?\n/u)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    return {
+      ...args,
+      subagent_type: agentName,
+      description: firstLine ? firstLine.slice(0, 84) : agentName,
+      ...(task ? { prompt: task } : {}),
     };
   }
 

@@ -261,6 +261,20 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
       return controller.getTurnFileChanges(params.target);
     },
 
+    async listSessionSubagents(params) {
+      const bucket = hub.getWorkspace(params);
+      const controller = bucket?.sessions.get(params.sessionId);
+      if (!controller) {
+        return {
+          revision: 0,
+          childSessionIds: [],
+          running: [],
+          ended: { total: 0, items: [] },
+        };
+      }
+      return controller.getSubagentDirectorySnapshot();
+    },
+
     async sendConversationCommandV4(params) {
       const parsed = parseCommandEnvelope(params.envelope);
       if (!parsed.ok) {
@@ -295,6 +309,10 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
           sessionId = prepared.sessionId;
         }
         const resolvedId = sessionId ?? `pi_${randomUUID()}`;
+        const requestedMode =
+          payload.firstInput?.planEnabled === true
+            ? "plan"
+            : (payload.firstInput?.mode ?? payload.config?.mode);
         const controller =
           bucket.sessions.get(resolvedId) ??
           hub.createSessionController(bucket, {
@@ -302,6 +320,7 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
             cwd: payload.cwd,
             modelSelection: payload.firstInput?.modelSelection ?? payload.config?.modelSelection,
             thoughtLevel: payload.config?.thought,
+            mode: requestedMode,
           });
 
         let ack: CommandAck;
@@ -310,7 +329,9 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
             commandId: envelope.commandId,
             clientId: envelope.clientId,
             text: payload.firstInput.text,
+            attachments: payload.firstInput.attachments,
             modelSelection: payload.firstInput.modelSelection ?? payload.config?.modelSelection,
+            mode: requestedMode,
             inputOrigin: envelope.inputOrigin,
           });
           ack =

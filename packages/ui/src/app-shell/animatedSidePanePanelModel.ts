@@ -53,16 +53,13 @@ export function resolveOpenTabLauncherItemIds({
   return itemIds;
 }
 
-export function shouldOfferSelectionSideConversation({
-  activeTaskId,
-  isMobileTextInputViewport,
-  mobileOverlay,
-}: {
+export function shouldOfferSelectionSideConversation(_input: {
   activeTaskId: string | null;
   isMobileTextInputViewport: boolean;
   mobileOverlay: boolean;
 }): boolean {
-  return Boolean(activeTaskId && !mobileOverlay && !isMobileTextInputViewport);
+  // Pi Zero 已移除未接通的右侧「辅助对话」遗留入口，右侧新标签页聚焦核心工作台工具（文件/浏览器/终端/审查）。
+  return false;
 }
 
 export function resolveAnimatedSidePanePanelLayout({ mobileOverlay }: { mobileOverlay: boolean }) {

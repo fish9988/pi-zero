@@ -10,7 +10,13 @@ import {
   type PiSlashCommandDef,
 } from "@zcode/shared/pi-config";
 import type { PiAgentService } from "#src/pi-runtime/contract.js";
-import { discoverPi, resolvePiAgentDir, type PiModelCatalog } from "#src/pi-runtime/index.js";
+import {
+  discoverPi,
+  getPiSessionExtensionUiSnapshot,
+  resolvePiAgentDir,
+  subscribePiExtensionUiState,
+  type PiModelCatalog,
+} from "#src/pi-runtime/index.js";
 import type { IPiConfigService } from "../contract.js";
 import {
   readPiAuthAndProvidersSnapshot,
@@ -75,6 +81,9 @@ export function createPiConfigService(
   const changeEmitter = new Emitter<PiConfigChangeEvent>();
   const slashCache = new Map<string, { expiresAt: number; commands: PiSlashCommandDef[] }>();
   let disposed = false;
+  const unsubExtensionUi = subscribePiExtensionUiState((sessionId) => {
+    if (!disposed) changeEmitter.fire({ area: "extensionUi", sessionId });
+  });
 
   const getAgentDir = (): string => resolvePiAgentDir(options.env);
   const emitChange = (area: PiConfigChangeEvent["area"]): void => {
@@ -409,6 +418,12 @@ export function createPiConfigService(
     },
 
     async runSessionAction(op) {
+      if (op.op === "getExtensionUiState") {
+        return {
+          op: "getExtensionUiState",
+          state: getPiSessionExtensionUiSnapshot(op.sessionId),
+        };
+      }
       return executePiSessionEcosystemAction(op, {
         agentDir: getAgentDir(),
         managedRuntimeDir,
@@ -420,6 +435,7 @@ export function createPiConfigService(
 
     dispose() {
       disposed = true;
+      unsubExtensionUi();
       slashCache.clear();
       changeEmitter.dispose();
     },

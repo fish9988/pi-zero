@@ -36,6 +36,7 @@ import {
   buildTurnSettlementDeltas,
   closeOpenReasoningRow,
   closeOpenStreamingRows,
+  isPiContentFilterError,
   type PiProjectorRuntimeState,
 } from "#src/pi-runtime/domain/piTurnSettlement.js";
 
@@ -221,11 +222,20 @@ function reduceMessageEnd(
   if (isAborted) state.turnAborted = true;
   if (isError) state.turnFailedError = message.errorMessage || "Model request failed";
 
-  const rowEndState = isAborted ? "interrupted" : isError ? "failed" : "complete";
+  const fallbackText = state.emittedTextInCurrentAssistantMsg
+    ? ""
+    : extractPiAssistantText(message);
+  const hasVisibleText = state.emittedTextInCurrentAssistantMsg || fallbackText.length > 0;
+  const isTruncatedContentFilter =
+    isError && hasVisibleText && isPiContentFilterError(state.turnFailedError);
+  const rowEndState = isAborted
+    ? "interrupted"
+    : isError && !isTruncatedContentFilter
+      ? "failed"
+      : "complete";
   deltas.push(...closeOpenStreamingRows(state, nowMs, rowEndState));
 
   if (!state.emittedTextInCurrentAssistantMsg) {
-    const fallbackText = extractPiAssistantText(message);
     if (fallbackText.length > 0) {
       const turnId = ensureActiveTurnId(state, nowMs, deltas);
       const rowId = allocateRowId(state);

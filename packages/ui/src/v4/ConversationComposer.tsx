@@ -179,6 +179,7 @@ import {
   useComposerAttachments,
 } from "@/v4/composer/useComposerAttachments.js";
 import { isComposerEditScopeId } from "@/composer-edit-mode/contract.js";
+import { PiExtensionStatusStrip } from "@/pi-conversation/index.js";
 import {
   type RegisterConversationDropTarget,
   type ConversationDropTargetController,
@@ -2952,6 +2953,7 @@ function ConversationComposerImpl({
           ) : null}
         </div>
       ) : null}
+      <PiExtensionStatusStrip sessionId={sessionId} />
       <div
         data-composer-element-screenshots={hiddenElementScreenshotsMarker || undefined}
         data-highspeed-composer={highspeedCard ? "true" : undefined}

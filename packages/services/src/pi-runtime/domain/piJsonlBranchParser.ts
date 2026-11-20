@@ -83,6 +83,150 @@ export function resolveActivePiBranchEntries(
   return chain;
 }
 
+/**
+ * 纯函数计算就地回退：按活动分支上第 `userOrdinal` 条真实 user 消息定位目标节点，
+ * 截断该节点及其所有后代（以及后续无 id 坏行），并将父节点移至末尾作为新叶子。
+ */
+export function computePiJsonlRewindBeforeUserOrdinal(
+  rawContent: string,
+  userOrdinal: number,
+): { readonly nextText: string; readonly droppedLines: number } | null {
+  interface RawLine {
+    readonly text: string;
+    readonly parsed: Record<string, unknown> | null;
+    readonly id: string | null;
+    readonly parentId: string | null;
+  }
+  let headerLine: string | null = null;
+  const lines: RawLine[] = [];
+  for (const raw of rawContent.split("\n")) {
+    const text = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (text.trim() === "") continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      lines.push({ text, parsed: null, id: null, parentId: null });
+      continue;
+    }
+    if (!isPiRecord(parsed)) {
+      lines.push({ text, parsed: null, id: null, parentId: null });
+      continue;
+    }
+    if (parsed["type"] === "session" && headerLine === null) {
+      headerLine = text;
+      continue;
+    }
+    lines.push({
+      text,
+      parsed,
+      id: typeof parsed["id"] === "string" && parsed["id"].trim() !== "" ? parsed["id"] : null,
+      parentId:
+        typeof parsed["parentId"] === "string" && parsed["parentId"].trim() !== ""
+          ? parsed["parentId"]
+          : null,
+    });
+  }
+
+  const byId = new Map<string, RawLine>();
+  let leafId: string | null = null;
+  for (const line of lines) {
+    if (line.id) {
+      byId.set(line.id, line);
+      leafId = line.id;
+    }
+  }
+  if (!leafId) {
+    // v1 线性格式回退：直接按第 userOrdinal 条 user 消息截断。
+    let seen = 0;
+    let cutIdx = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const p = lines[i]?.parsed;
+      const msg = p && p["type"] === "message" && isPiRecord(p["message"]) ? p["message"] : null;
+      if (msg && msg["role"] === "user") {
+        if (seen === userOrdinal) {
+          cutIdx = i;
+          break;
+        }
+        seen += 1;
+      }
+    }
+    if (cutIdx < 0) return null;
+    const kept = lines.slice(0, cutIdx).map((l) => l.text);
+    const out = headerLine ? [headerLine, ...kept] : kept;
+    return {
+      nextText: out.length > 0 ? `${out.join("\n")}\n` : "",
+      droppedLines: lines.length - cutIdx,
+    };
+  }
+
+  // 追溯活动分支链条
+  const activeChain: RawLine[] = [];
+  const visited = new Set<string>();
+  let cursor: string | null = leafId;
+  while (cursor && !visited.has(cursor)) {
+    visited.add(cursor);
+    const node = byId.get(cursor);
+    if (!node) break;
+    activeChain.push(node);
+    cursor = node.parentId;
+  }
+  activeChain.reverse();
+
+  let seenUsers = 0;
+  let target: RawLine | null = null;
+  for (const node of activeChain) {
+    const p = node.parsed;
+    const msg = p && p["type"] === "message" && isPiRecord(p["message"]) ? p["message"] : null;
+    if (msg && msg["role"] === "user") {
+      if (seenUsers === userOrdinal) {
+        target = node;
+        break;
+      }
+      seenUsers += 1;
+    }
+  }
+  if (!target) return null;
+
+  const rewound = new Set<RawLine>([target]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const line of lines) {
+      if (rewound.has(line) || !line.parentId) continue;
+      const parent = byId.get(line.parentId);
+      if (parent && rewound.has(parent)) {
+        rewound.add(line);
+        grew = true;
+      }
+    }
+  }
+
+  const targetIdx = lines.indexOf(target);
+  const kept: RawLine[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (rewound.has(line)) continue;
+    if (!line.id && i > targetIdx) continue;
+    kept.push(line);
+  }
+
+  // 将目标节点的 parentId 移至末尾，确保 Pi 重新打开时从该父节点续写。
+  if (target.parentId) {
+    const parentIdx = kept.findIndex((l) => l.id === target.parentId);
+    if (parentIdx >= 0 && parentIdx < kept.length - 1) {
+      const [parentLine] = kept.splice(parentIdx, 1);
+      if (parentLine) kept.push(parentLine);
+    }
+  }
+
+  const outLines = headerLine ? [headerLine, ...kept.map((l) => l.text)] : kept.map((l) => l.text);
+  return {
+    nextText: outLines.length > 0 ? `${outLines.join("\n")}\n` : "",
+    droppedLines: lines.length - kept.length,
+  };
+}
+
 export function readPiUserContentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";

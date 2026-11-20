@@ -1193,7 +1193,20 @@ export function ModelProviderSection({
       ) : null}
       {templatePickerOpen ? (
         <ProviderTemplatePicker
-          templates={providerTemplates}
+          templates={providerTemplates.filter(
+            (tpl) =>
+              ![
+                "zcode",
+                "zcode-start",
+                "zcode-coding-plan",
+                "bigmodel-coding-plan",
+                "bigmodel-team-coding-plan",
+                "bigmodel-start-plan",
+                "zai-coding-plan",
+                "zai-team-coding-plan",
+                "zai-start-plan",
+              ].includes(tpl.templateId.toLowerCase()),
+          )}
           creating={creatingProvider}
           onBack={() => setTemplatePickerOpen(false)}
           onCreateFromTemplate={(templateId) => {

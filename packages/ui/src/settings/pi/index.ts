@@ -11,3 +11,10 @@ export { PiExtensionsSection } from "./PiExtensionsSection.js";
 export { PiMcpToolsSection } from "./PiMcpToolsSection.js";
 export { PiKeybindingsNetworkSection } from "./PiKeybindingsNetworkSection.js";
 export { PiUsageAboutSection } from "./PiUsageAboutSection.js";
+export {
+  getPiSubagentPreferences,
+  updatePiSubagentPreferences,
+  usePiSubagentPreferences,
+  type PiSubagentDisplayDensity,
+  type PiSubagentPreferences,
+} from "./piSubagentPreferences.js";

@@ -17,6 +17,7 @@ import type {
 import { createHydratedConversationSnapshot } from "#src/pi-runtime/domain/piArchiveSnapshotFactory.js";
 import type { StructuredDiffHunk } from "#src/pi-runtime/domain/piEditDiffMapper.js";
 import type { PiPendingExtensionUiMeta } from "#src/pi-runtime/domain/piExtensionUiBridge.js";
+import type { VirtualSubagentSessionPayload } from "#src/pi-runtime/domain/piSubagentProjector.js";
 import { pauseQueueWithReason } from "#src/pi-runtime/domain/piQueueProjector.js";
 import {
   buildModelChangeMarkerRow,
@@ -82,6 +83,10 @@ export interface PiProjectorRuntimeState {
   readonly turnFileChanges: Map<string, PiTurnFileChangeEntry>;
   readonly fileChangesByTurnId: Map<string, V4ConversationFileChangesResult>;
   readonly pendingExtensionUiById: Map<string, PiPendingExtensionUiMeta>;
+  subagentRevision: number;
+  readonly subagentRowIdByChildId: Map<string, number>;
+  readonly subagentSessionsByChildId: Map<string, VirtualSubagentSessionPayload>;
+  readonly dirtySubagentChildIds: Set<string>;
   getRowById(rowId: number): WireConversationRow | undefined;
 }
 
@@ -200,6 +205,38 @@ export function resetTurnTransientTracking(state: PiProjectorRuntimeState): void
   state.turnFileChanges.clear();
 }
 
+const CONTENT_FILTER_ERROR_RE =
+  /content_filter|content_filtered|finish_reason\s*[:=]\s*content_filter/i;
+
+export function isPiContentFilterError(message: string | null | undefined): boolean {
+  return typeof message === "string" && CONTENT_FILTER_ERROR_RE.test(message);
+}
+
+export function classifyPiTurnError(
+  rawMessage: string,
+  emittedText: boolean,
+  nowMs: number,
+): SessionErrorInfo {
+  if (isPiContentFilterError(rawMessage)) {
+    return {
+      code: emittedText ? "fault.pi.contentFilterTruncated" : "fault.pi.contentFilterBlocked",
+      message: emittedText
+        ? "上游模型服务商触发了内容安全过滤，回复末尾可能被截断（Provider finish_reason: content_filter）。"
+        : "上游模型服务商的内容安全过滤拦截了本次回复，请调整提问或切换模型后重试（Provider finish_reason: content_filter）。",
+      recoverable: true,
+      at: nowMs,
+      source: "provider",
+    };
+  }
+  return {
+    code: "fault.pi.turnFailed",
+    message: rawMessage,
+    recoverable: true,
+    at: nowMs,
+    source: "provider",
+  };
+}
+
 export function buildTurnSettlementDeltas(
   state: PiProjectorRuntimeState,
   nowMs: number,
@@ -207,33 +244,36 @@ export function buildTurnSettlementDeltas(
   explicitError: SessionErrorInfo | null,
 ): ConversationDelta[] {
   const deltas: ConversationDelta[] = [];
+  const isTruncatedContentFilter =
+    !aborted &&
+    !explicitError &&
+    state.emittedTextInCurrentAssistantMsg &&
+    isPiContentFilterError(state.turnFailedError);
   const errorInfo: SessionErrorInfo | null = aborted
     ? null
     : (explicitError ??
       (state.turnFailedError
-        ? {
-            code: "fault.pi.turnFailed",
-            message: state.turnFailedError,
-            recoverable: true,
-            at: nowMs,
-            source: "provider",
-          }
+        ? classifyPiTurnError(state.turnFailedError, state.emittedTextInCurrentAssistantMsg, nowMs)
         : null));
 
-  const rowEndState = aborted ? "interrupted" : errorInfo ? "failed" : "complete";
+  const rowEndState = aborted
+    ? "interrupted"
+    : errorInfo && !isTruncatedContentFilter
+      ? "failed"
+      : "complete";
   deltas.push(...closeOpenStreamingRows(state, nowMs, rowEndState));
-  if (aborted || errorInfo) {
+  if (aborted || (errorInfo && !isTruncatedContentFilter)) {
     deltas.push(...cancelOpenToolCallRows(state, nowMs));
   }
 
   const turnState: TurnHeaderRow["state"] = aborted
     ? "completedInterrupted"
-    : errorInfo
+    : errorInfo && !isTruncatedContentFilter
       ? "failed"
       : "completedSuccess";
   const finalPhase: SessionPhase = aborted
     ? "completedInterrupted"
-    : errorInfo
+    : errorInfo && !isTruncatedContentFilter
       ? "error"
       : "completedSuccess";
 

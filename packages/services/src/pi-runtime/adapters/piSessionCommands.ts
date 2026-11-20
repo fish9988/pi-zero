@@ -7,6 +7,7 @@ import type {
   CommandAck,
   CommandEnvelope,
   CommandPayloadMap,
+  UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import type {
@@ -48,13 +49,22 @@ export interface PiSessionCommandHost {
     readonly thoughtLevels: readonly string[];
     readonly contextWindow?: number | undefined;
   }>;
+  applyModeSwitch(mode: string): Promise<void>;
   startFreshTurn(input: {
     commandId: string;
     clientId: string;
     text: string;
+    attachments?: UserInputRow["attachments"] | undefined;
+    conversationQuotes?: UserInputRow["conversationQuotes"] | undefined;
     modelSelection?: ModelSelection | undefined;
     inputOrigin?: "desktop" | "mobile" | undefined;
   }): Promise<CommandAck>;
+  handleEditUserQuery(
+    commandId: string,
+    clientId: string,
+    payload: CommandPayloadMap["editUserQuery"],
+    inputOrigin?: "desktop" | "mobile" | undefined,
+  ): Promise<CommandAck>;
   handleDeleteSession(commandId: string): Promise<CommandAck>;
 }
 
@@ -244,10 +254,18 @@ export async function dispatchPiSendText(
     }
   }
 
+  if (payload.planEnabled === true) {
+    await host.applyModeSwitch("plan");
+  } else if (payload.mode) {
+    await host.applyModeSwitch(payload.mode);
+  }
+
   return host.startFreshTurn({
     commandId: envelope.commandId,
     clientId: envelope.clientId,
     text: payload.text,
+    attachments: payload.attachments,
+    conversationQuotes: payload.conversationQuotes,
     modelSelection: payload.modelSelection,
     inputOrigin: envelope.inputOrigin ?? payload.inputOrigin,
   });
@@ -328,15 +346,22 @@ export async function dispatchPiAuxCommand(
 
     case "switchCollaborationMode": {
       const mode = (envelope.payload as CommandPayloadMap["switchCollaborationMode"]).mode;
-      const prev = projector.getSnapshot().config;
-      if (prev.mode !== mode) {
-        host.broadcastCommit(projector.applyConfigUpdate({ ...prev, mode }));
-      }
+      await host.applyModeSwitch(mode);
       return createCommandAck({
         commandId: envelope.commandId,
         status: "accepted",
         revisionAtDecision: projector.getRevision(),
       });
+    }
+
+    case "editUserQuery": {
+      const payload = envelope.payload as CommandPayloadMap["editUserQuery"];
+      return host.handleEditUserQuery(
+        envelope.commandId,
+        envelope.clientId,
+        payload,
+        envelope.inputOrigin,
+      );
     }
 
     case "deleteQueueItem": {
