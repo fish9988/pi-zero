@@ -6747,6 +6747,9 @@ export function SessionPane({
           isWebRemoteControl={compactForRemoteControl}
           provider={provider}
           snapshot={snapshot}
+          canStop={Boolean(snapshot.control.canStop)}
+          stopping={snapshot.control.stopState === "stopping"}
+          onStop={handleStopFromButton}
           onPlanInteractionAccepted={
             compactForRemoteControl ? handleMobilePlanInteractionAccepted : undefined
           }

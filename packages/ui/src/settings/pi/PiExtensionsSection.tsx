@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useSelectDirectory } from "@/hooks/usePlatform.js";
+import { useSettings } from "@/hooks/useSettingService.js";
 import type { PiWorkspaceScopedSectionProps } from "./contract.js";
 import {
   PiCard,
@@ -51,7 +52,9 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
   const selectDirectory = useSelectDirectory();
   const { service, resources, loading, reload } = usePiResourcesSnapshot(workspacePath);
   const { setSetting } = usePiSettingsSnapshot(workspacePath);
+  const { settings: appSettings, update: updateAppSettings } = useSettings();
   const subagentPrefs = usePiSubagentPreferences();
+  const builtinAskQuestionEnabled = appSettings?.piBuiltinAskQuestionEnabled !== false;
 
   const [scope, setScope] = useState<PiConfigScope>("global");
   const [pkgInput, setPkgInput] = useState("");
@@ -268,7 +271,52 @@ export function PiExtensionsSection({ workspacePath }: PiWorkspaceScopedSectionP
         </Button>
       </div>
 
-      {/* 0. Pi Subagent 独立窗口与交互效果设置 */}
+      {/* 0. Pi Zero 内置交互增强（QA 问答工具 + Subagent 窗口效果） */}
+      <div className="space-y-3">
+        <PiSectionHeader
+          title={tr("Pi Zero 内置交互增强", "Pi Zero Built-in Interaction Enhancements")}
+        />
+        <PiCard testId="pi-builtin-ask-question-card">
+          <PiRow
+            label={tr(
+              "内置交互式问答工具 (ask_question)",
+              "Built-in interactive QA tool (ask_question)",
+            )}
+            hint={tr(
+              "开启后在所有普通与只读对话中自动向 Pi 注入 ask_question 工具（不改写 ~/.pi/agent），模型可在需要澄清需求时直接呼出 QA 选择面板（新建或重启会话生效）。",
+              "Automatically injects the ask_question tool into Pi sessions so models can open the QA panel during normal conversations without a separate plan plugin.",
+            )}
+            control={
+              <Switch
+                checked={builtinAskQuestionEnabled}
+                onCheckedChange={(checked) => {
+                  void updateAppSettings({ piBuiltinAskQuestionEnabled: checked })
+                    .then(() => {
+                      toast(
+                        checked
+                          ? tr(
+                              "已启用内置 ask_question 工具（新建或重启会话生效）",
+                              "Enabled built-in ask_question tool",
+                            )
+                          : tr(
+                              "已关闭内置 ask_question 工具（新建或重启会话生效）",
+                              "Disabled built-in ask_question tool",
+                            ),
+                        { variant: "success" },
+                      );
+                    })
+                    .catch(() => {
+                      toast(tr("保存设置失败", "Failed to save setting"), { variant: "warning" });
+                    });
+                }}
+                data-testid="pi-builtin-ask-question-toggle"
+              />
+            }
+          />
+        </PiCard>
+      </div>
+
+      {/* 0.5 Pi Subagent 独立窗口与交互效果设置 */}
       <div className="space-y-3">
         <PiSectionHeader
           title={tr("Pi Subagent 显示与互动效果", "Pi Subagent Display & Interaction")}

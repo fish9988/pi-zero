@@ -73,6 +73,7 @@ export class PiWorkspaceHub {
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly platform: NodeJS.Platform | undefined;
   private readonly managedRuntimeDir: string | undefined;
+  private readonly isBuiltinAskQuestionEnabled: (() => Promise<boolean> | boolean) | undefined;
   private readonly onRuntimeLifecycle:
     | ((event: ZCodeAgentRuntimeLifecycleEvent) => void)
     | undefined;
@@ -83,12 +84,14 @@ export class PiWorkspaceHub {
     env?: NodeJS.ProcessEnv | undefined;
     platform?: NodeJS.Platform | undefined;
     managedRuntimeDir?: string | undefined;
+    isBuiltinAskQuestionEnabled?: (() => Promise<boolean> | boolean) | undefined;
     onRuntimeLifecycle?: ((event: ZCodeAgentRuntimeLifecycleEvent) => void) | undefined;
   }) {
     this.catalog = options.catalog;
     this.env = options.env;
     this.platform = options.platform;
     this.managedRuntimeDir = options.managedRuntimeDir;
+    this.isBuiltinAskQuestionEnabled = options.isBuiltinAskQuestionEnabled;
     this.onRuntimeLifecycle = options.onRuntimeLifecycle;
     this.scanner = new PiSessionIndexScanner({
       env: options.env,
@@ -150,6 +153,7 @@ export class PiWorkspaceHub {
       env: this.env,
       platform: this.platform,
       managedRuntimeDir: this.managedRuntimeDir,
+      isBuiltinAskQuestionEnabled: this.isBuiltinAskQuestionEnabled,
       hydratedFromDisk: input.hydratedFromDisk,
       readOnlyArchive: input.readOnlyArchive,
       callbacks: {

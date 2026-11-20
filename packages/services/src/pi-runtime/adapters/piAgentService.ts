@@ -59,6 +59,7 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     env: options.env,
     platform: options.platform,
     managedRuntimeDir: options.managedRuntimeDir,
+    isBuiltinAskQuestionEnabled: options.isBuiltinAskQuestionEnabled,
     onRuntimeLifecycle: (event) => {
       if (emittersDisposed) return;
       if (disposed && event.state === "available") return;

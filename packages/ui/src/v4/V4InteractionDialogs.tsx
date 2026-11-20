@@ -56,6 +56,9 @@ export interface V4InteractionDialogsProps {
   onCommandSettled?: (commandId: string) => void;
   resolveRecentScope: (sessionId: string) => Promise<ComposerScope>;
   onPlanInteractionAccepted?: (interactionId: string) => void;
+  canStop?: boolean;
+  stopping?: boolean;
+  onStop?: () => void;
 }
 
 export function getCurrentSessionInteractionSnapshot(
@@ -95,6 +98,9 @@ export function V4InteractionDialogs({
   onCommandSettled,
   onPlanInteractionAccepted,
   resolveRecentScope,
+  canStop = false,
+  stopping = false,
+  onStop,
 }: V4InteractionDialogsProps) {
   const { sendCommand } = useV4Conversation();
   const connectWorkspaceHookCommands = useWorkspaceHookReviewStore((state) => state.connect);
@@ -437,6 +443,9 @@ export function V4InteractionDialogs({
       <ElicitationDialog
         key={buildV4ElicitationProgressKey(elicitationRequest)}
         request={elicitationRequest}
+        canStop={canStop}
+        stopping={stopping}
+        onStop={onStop}
         initialFormDraft={
           botElicitationProgress?.requestId === elicitationRequest.requestId
             ? undefined

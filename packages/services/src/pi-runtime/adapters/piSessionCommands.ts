@@ -595,6 +595,16 @@ export async function dispatchPiAuxCommand(
         }
         await liveClient.clearQueue().catch(() => {});
         await liveClient.abort().catch(() => {});
+        // 若此前停在扩展阻塞交互或未进入流式循环，abort 不会补发 agent_end；
+        // 探查 Pi 实际流式态，已非 streaming 时立即收敛为 stopped，防止卡死在 running/stopping。
+        const liveState = await liveClient.getState().catch(() => null);
+        if (
+          liveState &&
+          !liveState.isStreaming &&
+          isSessionRunningPhase(projector.getSnapshot().control.phase)
+        ) {
+          host.broadcastCommit(projector.settleAfterStopWithoutProcess(Date.now()));
+        }
       } else {
         host.broadcastCommit(projector.settleAfterStopWithoutProcess(Date.now()));
       }

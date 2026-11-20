@@ -398,6 +398,8 @@ export interface AppSettings {
   defaultModelSelection?: import("./model-selection.js").ModelSelection | null;
   /** 设置了默认模型时，新建对话是否优先使用该默认模型（忽略项目最近使用记忆）；缺失按 true。 */
   preferDefaultModelForNewTasks?: boolean;
+  /** 是否在 Pi 会话启动时注入 Pi Zero 内置 `ask_question` 交互式问答工具；缺失按 true。 */
+  piBuiltinAskQuestionEnabled?: boolean;
   /** 设置页中每个 Provider Family 当前唯一的结构化连接选择。 */
   providerFamilyConnectionSelections?: ProviderFamilyConnectionSelectionSettings;
   /** 用户通过 WelcomeScreen 成功连接后确认的 ZAI / BigModel provider family 运行域。 */

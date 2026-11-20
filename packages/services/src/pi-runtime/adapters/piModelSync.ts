@@ -21,6 +21,10 @@ import {
 import { createInitialSessionConfig } from "#src/pi-runtime/domain/piSnapshotFactory.js";
 import { discoverPi } from "#src/pi-runtime/adapters/piDiscover.js";
 import type { PiAttachmentStore } from "#src/pi-runtime/adapters/piAttachmentStore.js";
+import {
+  PI_BUILTIN_ASK_QUESTION_TOOL_NAME,
+  ensureBuiltinAskQuestionExtensionFile,
+} from "#src/pi-runtime/adapters/piBuiltinAskQuestionExtension.js";
 import type { PiModelCatalog } from "#src/pi-runtime/adapters/piModelCatalog.js";
 import { PiRpcClient } from "#src/pi-runtime/adapters/piRpcClient.js";
 import { preparePiSessionFileForSpawn } from "#src/pi-runtime/adapters/piSessionIndexScanner.js";
@@ -59,6 +63,7 @@ export interface PiSessionControllerOptions {
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly platform?: NodeJS.Platform | undefined;
   readonly managedRuntimeDir?: string | undefined;
+  readonly isBuiltinAskQuestionEnabled?: (() => Promise<boolean> | boolean) | undefined;
   readonly hydratedFromDisk?:
     | { readonly filePath: string; readonly hydrated: HydratedPiSessionResult }
     | undefined;
@@ -298,6 +303,7 @@ export async function spawnConfiguredPiClient(input: {
   model?: string | undefined;
   thought?: string | undefined;
   mode?: string | undefined;
+  isBuiltinAskQuestionEnabled?: (() => Promise<boolean> | boolean) | undefined;
   isDisposed: () => boolean;
 }): Promise<{ readonly client: PiRpcClient; readonly sessionFile: string | undefined }> {
   const launch = await discoverPi({
@@ -325,7 +331,24 @@ export async function spawnConfiguredPiClient(input: {
   if (input.isDisposed()) throw new Error("Session disposed while preparing Pi session file");
 
   const executionMode = normalizePiExecutionMode(input.mode);
-  const extraArgs = executionMode === "plan" ? ["--tools", PI_READ_ONLY_TOOLS_ARG] : undefined;
+  const enableBuiltinAskQuestion = input.isBuiltinAskQuestionEnabled
+    ? await Promise.resolve(input.isBuiltinAskQuestionEnabled()).catch(() => true)
+    : true;
+  const extraArgs: string[] = [];
+  if (enableBuiltinAskQuestion) {
+    try {
+      const extPath = await ensureBuiltinAskQuestionExtensionFile();
+      extraArgs.push("-e", extPath);
+    } catch {
+      // 扩展落盘失败不阻断 Pi 正常启动
+    }
+  }
+  if (executionMode === "plan") {
+    const toolsList = enableBuiltinAskQuestion
+      ? `${PI_READ_ONLY_TOOLS_ARG},${PI_BUILTIN_ASK_QUESTION_TOOL_NAME}`
+      : PI_READ_ONLY_TOOLS_ARG;
+    extraArgs.push("--tools", toolsList);
+  }
 
   const client = await PiRpcClient.spawn({
     launch,
@@ -335,7 +358,7 @@ export async function spawnConfiguredPiClient(input: {
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.thought ? { thinkingLevel: input.thought } : {}),
-    ...(extraArgs ? { extraArgs } : {}),
+    ...(extraArgs.length > 0 ? { extraArgs } : {}),
   });
   if (input.isDisposed()) {
     await client.closeAndWait(2_000).catch(() => {});

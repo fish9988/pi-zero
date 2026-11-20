@@ -176,6 +176,8 @@ export interface PiAgentServiceOptions {
   readonly platform?: NodeJS.Platform | undefined;
   readonly managedRuntimeDir?: string | undefined;
   readonly prepareSessionCreation?: PiPrepareSessionCreation | undefined;
+  /** 动态查询是否启用 Pi Zero 内置 `ask_question` 扩展（缺失按 true）。 */
+  readonly isBuiltinAskQuestionEnabled?: (() => Promise<boolean> | boolean) | undefined;
 }
 
 export interface PiDiscoveredSessionRecord {

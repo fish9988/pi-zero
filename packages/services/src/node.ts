@@ -2494,6 +2494,8 @@ export function createLocalServices(options: {
     : createPiAgentService({
         catalog: piModelCatalog ?? undefined,
         prepareSessionCreation,
+        isBuiltinAskQuestionEnabled: async () =>
+          (await settingService.get()).piBuiltinAskQuestionEnabled !== false,
       });
   const piUnifiedProject =
     piAgentService && (!options?.projectStorageHostId || options.projectStorageHostId === "local")

@@ -34,6 +34,67 @@ function normalizePromptText(title: string | undefined, message: string | undefi
   return m || t || "Pi extension requested input";
 }
 
+/**
+ * 解析 Pi `select` 标题与正文：
+ * - 避免 `header` 与 `question` 相同导致 QA 面板把同一句话重复渲染两次；
+ * - 支持 `[短标签] 问题正文` 与 `短标签\n问题正文` 格式拆出简洁胶囊标签。
+ */
+function parsePiSelectHeaderAndQuestion(
+  rawTitle: string | undefined,
+  rawMessage: string | undefined,
+): { readonly header: string; readonly question: string } {
+  const title = rawTitle?.trim() ?? "";
+  const message = rawMessage?.trim() ?? "";
+  if (title && message && title !== message) {
+    return title.length <= 24
+      ? { header: title, question: message }
+      : { header: "", question: `${title}\n${message}` };
+  }
+  const single = message || title || "请选择";
+  const bracketMatch = /^\[([^\]\r\n]{1,24})\]\s+([\s\S]+)$/.exec(single);
+  if (bracketMatch?.[1] && bracketMatch[2]) {
+    return { header: bracketMatch[1].trim(), question: bracketMatch[2].trim() };
+  }
+  return { header: "", question: single };
+}
+
+/**
+ * 清洗 Pi `select` 选项展示文本：
+ * - `value` 严格保留原始字符串，保证回发 `extension_ui_response.value` 与插件分支判断 100% 匹配；
+ * - 剥离插件自带的重复序号前缀（如 `1. ` / `2) ` / `3、`），避免与 UI 左侧序号形成双重编号；
+ * - 若包含 ` — ` 分隔说明，则拆成 `label` + `description` 呈现层次。
+ */
+function formatPiSelectOptionDisplay(
+  rawOption: string,
+  index: number,
+  stripNumbering: boolean,
+): { readonly value: string; readonly label: string; readonly description?: string | undefined } {
+  const trimmed = rawOption.trim();
+  const withoutNum = stripNumbering
+    ? trimmed.replace(new RegExp(`^${index + 1}\\s*[.)、]\\s+`), "")
+    : trimmed;
+  const dashIdx = withoutNum.indexOf(" — ");
+  if (dashIdx > 0 && dashIdx < withoutNum.length - 3) {
+    const label = withoutNum.slice(0, dashIdx).trim();
+    const description = withoutNum.slice(dashIdx + 3).trim();
+    if (label && description) {
+      return { value: rawOption, label, description };
+    }
+  }
+  return { value: rawOption, label: withoutNum || rawOption };
+}
+
+function shouldStripSequentialOptionNumbers(labels: readonly string[]): boolean {
+  if (labels.length === 0) return false;
+  let matched = 0;
+  for (let i = 0; i < labels.length; i += 1) {
+    if (new RegExp(`^\\s*${i + 1}\\s*[.)、]\\s+`).test(labels[i]!)) {
+      matched += 1;
+    }
+  }
+  return matched >= Math.min(2, labels.length);
+}
+
 /** 将 Pi 阻塞型 `extension_ui_request` 投影为严格通过 `pendingInteractionSchema` 的 ZCode 交互项。 */
 export function mapPiExtensionUiRequestToInteraction(
   event: PiExtensionUiRequestEvent,
@@ -72,8 +133,11 @@ export function mapPiExtensionUiRequestToInteraction(
     const labels = Array.isArray(event.options)
       ? event.options.filter((item): item is string => typeof item === "string" && item.length > 0)
       : [];
-    const title = event.title?.trim() || "请选择";
-    const questionText = event.message?.trim() || title;
+    const { header, question } = parsePiSelectHeaderAndQuestion(event.title, event.message);
+    const stripNumbering = shouldStripSequentialOptionNumbers(labels);
+    const displayOptions = labels.map((label, index) =>
+      formatPiSelectOptionDisplay(label, index, stripNumbering),
+    );
     const interaction: PendingInteraction = {
       interactionId: id,
       kind: "userInput",
@@ -83,12 +147,20 @@ export function mapPiExtensionUiRequestToInteraction(
         kind: "userInput",
         prompt: normalizePromptText(event.title, event.message),
         freeText: false,
-        options: labels.map((label, index) => ({ optionId: String(index), label })),
+        options: displayOptions.map((opt, index) => ({
+          optionId: String(index),
+          label: opt.label,
+          ...(opt.description ? { description: opt.description } : {}),
+        })),
         questions: [
           {
-            header: title,
-            question: questionText,
-            options: labels.map((label) => ({ value: label, label })),
+            header,
+            question,
+            options: displayOptions.map((opt) => ({
+              value: opt.value,
+              label: opt.label,
+              ...(opt.description ? { description: opt.description } : {}),
+            })),
             multiSelect: false,
           },
         ],

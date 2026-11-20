@@ -90,6 +90,7 @@ export class PiSessionController {
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly platform: NodeJS.Platform | undefined;
   private readonly managedRuntimeDir: string | undefined;
+  private readonly isBuiltinAskQuestionEnabled: (() => Promise<boolean> | boolean) | undefined;
   private readonly callbacks: PiSessionControllerCallbacks;
   private readonly subscriptions = new Map<string, TopicSubscriptionState>();
   private readonly deltaCoalescer: PiDeltaCoalescer;
@@ -123,6 +124,7 @@ export class PiSessionController {
     this.env = options.env;
     this.platform = options.platform;
     this.managedRuntimeDir = options.managedRuntimeDir;
+    this.isBuiltinAskQuestionEnabled = options.isBuiltinAskQuestionEnabled;
     this.callbacks = options.callbacks;
 
     const { config, contextWindowMax, modelCost } = resolveInitialControllerConfig({
@@ -578,6 +580,7 @@ export class PiSessionController {
         model: override?.model ?? config.model,
         thought: override?.thought ?? config.thought,
         mode: executionMode,
+        isBuiltinAskQuestionEnabled: this.isBuiltinAskQuestionEnabled,
         isDisposed: () => this.disposed,
       });
       this.activeClientMode = executionMode;
@@ -703,42 +706,32 @@ export class PiSessionController {
   }
 
   private async syncModelConfigToClient(client: PiRpcClient): Promise<PiRpcClient> {
-    const config = this.projector.getSnapshot().config;
-    if (!config.provider || !config.model) return client;
+    const { provider, model, thought, thoughtLevels } = this.projector.getSnapshot().config;
+    if (!provider || !model) return client;
     try {
-      // 回合 prompt 尚未下发给 Pi，子进程仍空闲，允许 /model not found/i 时空闲重启一次。
       const synced = await this.applyLiveModelSwitch(
-        {
-          provider: config.provider,
-          model: config.model,
-          thought: config.thought,
-          thoughtLevels: config.thoughtLevels,
-        },
+        { provider, model, thought, thoughtLevels },
         true,
       );
       return synced.client;
     } catch (error: unknown) {
-      if (client.alive) {
+      if (client.alive)
         logger.warn(undefined, `Pi 回合前同步模型失败: ${formatRedactedPiError(error)}`);
-      }
       return this.client?.alive ? this.client : client;
     }
   }
 
   private handlePiEvent(event: PiRpcEvent): void {
     if (this.disposed) return;
-    if (event.type === "thinking_level_changed") {
-      const trimmed = event.level.trim();
-      if (trimmed) this.activeClientThinking = trimmed;
+    if (event.type === "thinking_level_changed" && event.level.trim()) {
+      this.activeClientThinking = event.level.trim();
     }
-    if (event.type === "extension_ui_request") {
+    if (event.type === "extension_ui_request")
       applyPiExtensionUiEvent(this.sessionId, event, Date.now());
-    }
     this.broadcastCommit(this.projector.applyPiEvent(event, Date.now()));
     const dirtySubagents = this.projector.drainDirtyVirtualSubagentSessions();
-    if (dirtySubagents.length > 0) {
+    if (dirtySubagents.length > 0)
       this.callbacks.onVirtualSubagentSessionsUpdated?.(dirtySubagents);
-    }
   }
 
   private handlePiExit(exitedClient: PiRpcClient, info: PiRpcExitInfo): void {
@@ -747,17 +740,11 @@ export class PiSessionController {
       this.client = null;
     }
     if (this.disposed) return;
-    const drained = this.projector.drainPendingExtensionUiInteractions();
-    this.broadcastCommit(drained.commit);
+    this.broadcastCommit(this.projector.drainPendingExtensionUiInteractions().commit);
     if (isSessionRunningPhase(this.projector.getSnapshot().control.phase)) {
       const suffix = info.stderr ? `: ${info.stderr}` : "";
-      this.broadcastCommit(
-        this.projector.failActiveTurn(
-          `Pi process exited unexpectedly (code=${String(info.code)}, signal=${String(info.signal)})${suffix}`,
-          Date.now(),
-          "runtime",
-        ),
-      );
+      const msg = `Pi process exited unexpectedly (code=${String(info.code)}, signal=${String(info.signal)})${suffix}`;
+      this.broadcastCommit(this.projector.failActiveTurn(msg, Date.now(), "runtime"));
     }
   }
 
