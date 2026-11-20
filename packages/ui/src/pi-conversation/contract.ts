@@ -1,7 +1,32 @@
 /**
  * pi-conversation-ui 公开契约。
  */
-import type { ZCodeSlashCommand } from "@zcode/shared";
+import type { ModelSelection, ZCodeSlashCommand, ZCodeTaskMeta } from "@zcode/shared";
+import type { PiSessionEcosystemAction, PiSessionEcosystemResult } from "@zcode/shared/pi-config";
+
+export interface PiSessionActionServices {
+  readonly piConfigService?:
+    | {
+        runSessionAction(op: PiSessionEcosystemAction): Promise<PiSessionEcosystemResult>;
+      }
+    | undefined;
+  readonly zcodeTaskService: {
+    renameTask(params: {
+      taskId: string;
+      workspacePath: string;
+      title: string;
+      workspaceIdentity?: string | undefined;
+    }): Promise<ZCodeTaskMeta>;
+    deleteTask(params: {
+      taskId: string;
+      workspacePath: string;
+      workspaceIdentity?: string | undefined;
+    }): Promise<void>;
+  };
+  readonly settingService: {
+    get(): Promise<{ readonly defaultModelSelection?: ModelSelection | null | undefined }>;
+  };
+}
 
 export interface PiBtwPopoverProps {
   readonly open: boolean;

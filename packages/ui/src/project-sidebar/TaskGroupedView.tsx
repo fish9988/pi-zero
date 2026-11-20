@@ -1,5 +1,6 @@
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
-import { useComposerClientNamespace } from "@/hooks/useServices.js";
+import { persistManualPiSessionTitle } from "@/pi-conversation/index.js";
+import { useComposerClientNamespace, useServices } from "@/hooks/useServices.js";
 import { readComposerWorkspaceScope } from "@/v4/composer/composerDraftStore.js";
 import {
   useCallback,
@@ -94,6 +95,7 @@ export function TaskGroupedView({
 }) {
   const { groups: organization, loading } = useProjectDirectory();
   const { intl } = useZCodeIntl();
+  const services = useServices();
   const presentation = useContext(ProjectTaskListContext);
   const { zcodeTaskService: service, windowControllerService: controller } =
     useBaseWorkspaceServices();
@@ -438,7 +440,13 @@ export function TaskGroupedView({
         onConfirm={() =>
           action(async () => {
             if (!renamingTask) return;
-            await mutate(renamingTask, { kind: "rename", title: renameDraft.trim() });
+            const trimmed = renameDraft.trim();
+            await mutate(renamingTask, { kind: "rename", title: trimmed });
+            persistManualPiSessionTitle(services, {
+              workspacePath: renamingTask.workspacePath,
+              sessionId: renamingTask.taskId,
+              title: trimmed,
+            });
             setRenamingTask(null);
           }, "taskList.renameFailed")
         }

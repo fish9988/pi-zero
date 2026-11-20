@@ -17,8 +17,11 @@ export function TaskListItemContextMenu({
   providerConfigFile,
   onTogglePinTask,
   onStartRenameTask,
+  onSmartRenameTask,
+  smartRenamePending = false,
   onArchiveTask,
   onMarkTaskAsUnread,
+  onDeleteTask,
   onOpenTaskFeedback,
   onOpenTaskPathInFileManager,
   onCopyWorkspacePath,
@@ -48,8 +51,11 @@ export function TaskListItemContextMenu({
   providerConfigFile: { loading: boolean; path: string | null; exists: boolean };
   onTogglePinTask: () => void;
   onStartRenameTask: () => void;
+  onSmartRenameTask?: () => void;
+  smartRenamePending?: boolean;
   onArchiveTask: () => void;
   onMarkTaskAsUnread: () => void;
+  onDeleteTask?: () => void;
   onOpenTaskFeedback: () => void;
   onOpenTaskPathInFileManager: () => void;
   onCopyWorkspacePath: () => void;
@@ -78,8 +84,11 @@ export function TaskListItemContextMenu({
         Separator={ContextMenuSeparator}
         onTogglePinTask={onTogglePinTask}
         onStartRenameTask={onStartRenameTask}
+        onSmartRenameTask={onSmartRenameTask}
+        smartRenamePending={smartRenamePending}
         onArchiveTask={onArchiveTask}
         onMarkTaskAsUnread={onMarkTaskAsUnread}
+        onDeleteTask={onDeleteTask}
         onOpenTaskFeedback={onOpenTaskFeedback}
         onOpenTaskPathInFileManager={onOpenTaskPathInFileManager}
         onCopyWorkspacePath={onCopyWorkspacePath}

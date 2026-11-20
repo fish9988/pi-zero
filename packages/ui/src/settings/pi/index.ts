@@ -18,3 +18,13 @@ export {
   type PiSubagentDisplayDensity,
   type PiSubagentPreferences,
 } from "./piSubagentPreferences.js";
+export { PiSmartRenameSettingsCard } from "./PiSmartRenameSettingsCard.js";
+export {
+  DEFAULT_PI_SMART_RENAME_PROMPT,
+  SMART_RENAME_THINKING_LEVELS,
+  getPiSmartRenamePreferences,
+  resetPiSmartRenamePrompt,
+  updatePiSmartRenamePreferences,
+  usePiSmartRenamePreferences,
+  type PiSmartRenamePreferences,
+} from "@/pi-conversation/index.js";

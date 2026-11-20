@@ -8799,6 +8799,18 @@ const zhCN: Record<string, string> = {
   "settings.piKeybindingsNetwork.fileSearchExcludes": "工作区文件搜索排除规则",
   "settings.piKeybindingsNetwork.fileSearchExcludesDescription":
     "配置工作区文件检索时需要忽略的目录或通配规则。",
+  "settings.pi.smartRename.model": "智能重命名模型",
+  "settings.pi.smartRename.modelDescription":
+    "配置右键菜单与自动重命名所使用的独立 LLM 模型。",
+  "settings.pi.smartRename.thinking": "智能重命名思考强度",
+  "settings.pi.smartRename.thinkingDescription":
+    "设置智能重命名调用 LLM 时的思考强度（默认 off）。",
+  "settings.pi.smartRename.auto": "新会话首轮完成后自动智能重命名",
+  "settings.pi.smartRename.autoDescription":
+    "开启后，新会话首轮对话完成时自动在后台生成标题。",
+  "settings.pi.smartRename.prompt": "智能重命名提示词",
+  "settings.pi.smartRename.promptDescription":
+    "自定义智能重命名提示词模板，支持 {{context}} 占位符。",
   ...requestSecurityMessagesZhCN,
 };
 

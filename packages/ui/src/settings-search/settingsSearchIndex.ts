@@ -200,6 +200,30 @@ const ALL_SETTINGS_SEARCH_ITEMS = [
     visibility: "all",
   },
   {
+    id: "settings.pi.smartRename.model",
+    section: "modelProvider",
+    description: "settings.pi.smartRename.modelDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.pi.smartRename.thinking",
+    section: "modelProvider",
+    description: "settings.pi.smartRename.thinkingDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.pi.smartRename.auto",
+    section: "modelProvider",
+    description: "settings.pi.smartRename.autoDescription",
+    visibility: "all",
+  },
+  {
+    id: "settings.pi.smartRename.prompt",
+    section: "modelProvider",
+    description: "settings.pi.smartRename.promptDescription",
+    visibility: "all",
+  },
+  {
     id: "settings.themeMode",
     section: "appearance",
     description: "settings.themeModeDescription",

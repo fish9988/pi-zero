@@ -43,6 +43,7 @@ import {
   buildReconciledSessionsResult,
   createPiWorkspaceBucket,
   diffDiskSessionSummaries,
+  disposePiWorkspaceBucket,
   loadHydratedPiSessionFromDisk,
   mergePublishedSessionSummaries,
   reloadRewoundPiSessionFromDisk,
@@ -637,6 +638,58 @@ export class PiWorkspaceHub {
     return collectAuthorizedAttachmentLocalRefs(rows, queueItems);
   }
 
+  async removeSessionFromHub(
+    target: ZCodeAgentWorkspaceTarget,
+    sessionId: string,
+  ): Promise<string | null> {
+    let knownFile: string | null = null;
+    const direct = this.getWorkspace(target);
+    const buckets = [
+      ...(direct ? [direct] : []),
+      ...[...this.workspaces.values()].filter(
+        (c) => c !== direct && (c.sessions.has(sessionId) || c.diskSessions.has(sessionId)),
+      ),
+    ];
+    for (const bucket of buckets) {
+      const controller = bucket.sessions.get(sessionId);
+      const disk = bucket.diskSessions.get(sessionId);
+      knownFile ??= controller?.getSessionFilePath() ?? disk?.file ?? null;
+      bucket.sessions.delete(sessionId);
+      bucket.diskSessions.delete(sessionId);
+      bucket.deletedSessionIds.add(sessionId);
+      if (controller) await controller.disposeAndWait();
+      this.emitSessionsIndexDeltas(bucket, [{ op: "session.removed", sessionId }]);
+    }
+    if (buckets.length > 0) this.notifySessionRegistryChanged();
+    return knownFile;
+  }
+
+  async applyExternalSessionTitle(
+    target: ZCodeAgentWorkspaceTarget,
+    sessionId: string,
+    title: string,
+  ): Promise<boolean> {
+    const trimmed = title.trim();
+    if (!trimmed) return false;
+    const bucket = this.getWorkspace(target);
+    const controller = bucket?.sessions.get(sessionId);
+    if (controller) {
+      await controller.applyExternalTitle(trimmed);
+      return true;
+    }
+    const disk = bucket?.diskSessions.get(sessionId);
+    if (!bucket || !disk) return false;
+    const updatedSummary: SessionSummary = {
+      ...disk.summary,
+      title: trimmed,
+      titleSource: "custom",
+    };
+    bucket.diskSessions.set(sessionId, { ...disk, summary: updatedSummary });
+    this.emitSessionsIndexDeltas(bucket, [{ op: "session.upserted", session: updatedSummary }]);
+    this.notifySessionRegistryChanged();
+    return true;
+  }
+
   async disposeAllAndWait(): Promise<void> {
     this.sessionRegistryListeners.clear();
     const allBuckets = [...this.workspaces.values()];
@@ -729,21 +782,6 @@ export class PiWorkspaceHub {
   }
 
   private async disposeBucket(bucket: PiWorkspaceBucket): Promise<void> {
-    bucket.disposed = true;
-    bucket.watcherDispose?.();
-    bucket.watcherDispose = null;
-    for (const timer of bucket.deferredTimers) clearTimeout(timer);
-    bucket.deferredTimers.clear();
-    const controllers = [...bucket.sessions.values()];
-    bucket.sessions.clear();
-    bucket.diskSessions.clear();
-    bucket.sessionsIndexSubs.clear();
-    bucket.workspaceConfigSubs.clear();
-    this.emitRuntimeLifecycle(bucket, "unavailable");
-    await Promise.all(controllers.map((controller) => controller.disposeAndWait()));
-    bucket.conversationFrameEmitter.dispose();
-    bucket.sessionsIndexFrameEmitter.dispose();
-    bucket.workspaceConfigFrameEmitter.dispose();
-    bucket.sessionLifecycleEmitter.dispose();
+    await disposePiWorkspaceBucket(bucket, () => this.emitRuntimeLifecycle(bucket, "unavailable"));
   }
 }

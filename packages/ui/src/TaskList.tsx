@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button.js";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu.js";
 import { toast } from "@/components/ui/toast.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useServices } from "@/hooks/useServices.js";
+import { persistManualPiSessionTitle } from "@/pi-conversation/index.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { NewTaskButtonGroup } from "@/NewTaskButtonGroup.js";
 import { useTabStore } from "@/store/TabStoreProvider.js";
@@ -84,6 +86,7 @@ export const TaskList = memo(function TaskList({
   renameOnDoubleClick?: boolean;
 }) {
   const { intl } = useZCodeIntl();
+  const services = useServices();
   const pinnedTaskIdSet = useMemo(
     () => new Set(pinnedTasks.map((task) => task.taskId)),
     [pinnedTasks],
@@ -280,6 +283,12 @@ export const TaskList = memo(function TaskList({
         return;
       }
 
+      persistManualPiSessionTitle(services, {
+        workspacePath: task.workspacePath || workspacePath,
+        sessionId: taskId,
+        title: normalizedTitle,
+      });
+
       handleCancelRenameTask();
       logger.info("[TaskList] rename submit dialog closed", {
         taskId,
@@ -293,6 +302,7 @@ export const TaskList = memo(function TaskList({
       onRenameTask,
       readOnlyReason,
       renameDraft,
+      services,
       taskLookup,
       workspaceIdentity,
       workspacePath,

@@ -158,6 +158,12 @@ export class PiSessionController {
     rows: this.projector.getAllRows(),
     queueItems: this.projector.getSnapshot().queue.items,
   });
+  async applyExternalTitle(title: string): Promise<void> {
+    const trimmed = title.trim();
+    if (!trimmed || this.disposed) return;
+    this.broadcastCommit(this.projector.applyRename(trimmed));
+    if (this.client?.alive) await this.client.setSessionName(trimmed).catch(() => {});
+  }
   unsubscribe = (subscriptionId: string) => this.subscriptions.delete(subscriptionId);
   updateVirtualSubagentSnapshot(
     snapshot: import("@zcode/shared/zcode-protocol-v4").ConversationSnapshot,

@@ -9301,6 +9301,18 @@ const enUS: Record<string, string> = {
   "settings.piKeybindingsNetwork.fileSearchExcludes": "Workspace File Search Excludes",
   "settings.piKeybindingsNetwork.fileSearchExcludesDescription":
     "Configure excluded directories and glob patterns for workspace file search.",
+  "settings.pi.smartRename.model": "Smart Rename Model",
+  "settings.pi.smartRename.modelDescription":
+    "Select the dedicated LLM model used for smart session renaming.",
+  "settings.pi.smartRename.thinking": "Smart Rename Thinking Level",
+  "settings.pi.smartRename.thinkingDescription":
+    "Configure reasoning effort for smart rename requests (defaults to off).",
+  "settings.pi.smartRename.auto": "Auto Smart Rename After First Turn",
+  "settings.pi.smartRename.autoDescription":
+    "Automatically rename new sessions after their first assistant turn finishes.",
+  "settings.pi.smartRename.prompt": "Smart Rename Prompt",
+  "settings.pi.smartRename.promptDescription":
+    "Customize the prompt template for smart session renaming (supports {{context}}).",
   ...requestSecurityMessagesEnUS,
 };
 

@@ -98,6 +98,21 @@ export interface PiRewindSessionResult {
   readonly backupFile: string | null;
 }
 
+export interface PiSmartRenameResult {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly durationMs: number;
+}
+
+export type PiDeleteSessionMode = "trash" | "permanent";
+
+export interface PiDeleteSessionResult {
+  readonly sessionId: string;
+  readonly deletedFile: string | null;
+  readonly trashed: boolean;
+  readonly mode: PiDeleteSessionMode;
+}
+
 // ── IPiConfigService 分组变更与结果联合类型（保持接口 <= 12 公开方法）──
 
 export type PiSettingsMutation =
@@ -293,6 +308,28 @@ export type PiSessionEcosystemAction =
   | {
       readonly op: "getExtensionUiState";
       readonly sessionId: string;
+    }
+  | {
+      readonly op: "smartRename";
+      readonly workspacePath: string;
+      readonly sessionId: string;
+      readonly provider?: string | undefined;
+      readonly model?: string | undefined;
+      readonly thinkingLevel?: PiThinkingLevel | undefined;
+      readonly prompt?: string | undefined;
+      readonly currentTitle?: string | undefined;
+    }
+  | {
+      readonly op: "persistTitle";
+      readonly workspacePath: string;
+      readonly sessionId: string;
+      readonly title: string;
+    }
+  | {
+      readonly op: "deleteSession";
+      readonly workspacePath: string;
+      readonly sessionId: string;
+      readonly mode: PiDeleteSessionMode;
     };
 
 export type PiSessionEcosystemResult =
@@ -301,4 +338,7 @@ export type PiSessionEcosystemResult =
   | { readonly op: "getTree"; readonly tree: PiSessionTreeSnapshot }
   | { readonly op: "fork"; readonly result: PiForkSessionResult }
   | { readonly op: "rewindTo"; readonly result: PiRewindSessionResult }
-  | { readonly op: "getExtensionUiState"; readonly state: PiSessionExtensionUiSnapshot };
+  | { readonly op: "getExtensionUiState"; readonly state: PiSessionExtensionUiSnapshot }
+  | { readonly op: "smartRename"; readonly result: PiSmartRenameResult }
+  | { readonly op: "persistTitle"; readonly persisted: boolean }
+  | { readonly op: "deleteSession"; readonly result: PiDeleteSessionResult };

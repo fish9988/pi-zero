@@ -20,6 +20,12 @@ import {
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { buildTaskFeedbackDescription } from "@/lib/taskFeedbackDraft.js";
 import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
+import { useServices } from "@/hooks/useServices.js";
+import {
+  requestDeletePiSession,
+  runSmartRenamePiSession,
+  usePiSmartRenamePending,
+} from "@/pi-conversation/index.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
 import {
   getTaskListAttention,
@@ -97,6 +103,8 @@ function GroupedTaskRowComponent({
     ...(remoteSessionId ? { remoteSessionId } : {}),
     sessionId: task.taskId,
   });
+  const services = useServices();
+  const smartRenamePending = usePiSmartRenamePending(task.taskId);
   const workspaceKey = buildTaskWorkspaceKey(task.workspacePath, task.workspaceIdentity);
   const taskActivity = getTaskListRowActivity(task);
   const taskAttention = getTaskListAttention(task);
@@ -516,8 +524,26 @@ function GroupedTaskRowComponent({
           onMoveTaskToGroup={onMoveTaskToGroup}
           onMoveTaskToTop={onMoveTaskToTop}
           onStartRenameTask={onStartRenameTask}
+          onSmartRenameTask={(targetTask) => {
+            void runSmartRenamePiSession({
+              services,
+              workspacePath: targetTask.workspacePath,
+              workspaceIdentity: targetTask.workspaceIdentity,
+              sessionId: targetTask.taskId,
+              currentTitle: taskTitle,
+            });
+          }}
+          smartRenamePending={smartRenamePending}
           onArchiveTask={onArchiveTask}
           onMarkTaskAsUnread={onMarkTaskAsUnread}
+          onDeleteTask={(targetTask) => {
+            requestDeletePiSession({
+              workspacePath: targetTask.workspacePath,
+              workspaceIdentity: targetTask.workspaceIdentity,
+              taskId: targetTask.taskId,
+              title: taskTitle,
+            });
+          }}
           onOpenTaskPathInFileManager={() => void handleOpenTaskPathInFileManager()}
           onCopyText={(label, text) => void handleCopyText(label, text)}
           onOpenProviderConfig={() => void handleOpenProviderConfig()}

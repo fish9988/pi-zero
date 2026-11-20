@@ -41,7 +41,12 @@ import { TaskListItemContextMenu } from "@/TaskListItemContextMenu.js";
 import { TaskInteractionBadge } from "@/TaskInteractionBadge.js";
 import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
-import { useModelTrajectoryStore } from "@/store/modelTrajectoryStore.js";
+import { useServices } from "@/hooks/useServices.js";
+import {
+  requestDeletePiSession,
+  runSmartRenamePiSession,
+  usePiSmartRenamePending,
+} from "@/pi-conversation/index.js";
 import { buildTaskFeedbackDescription } from "@/lib/taskFeedbackDraft.js";
 import { toast } from "@/components/ui/toast.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
@@ -937,6 +942,8 @@ export function TaskListItemContextMenuContent({
   const workspaceActionsDisabledReason = workspaceActionsDisabled
     ? (disabledReason ?? intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" }))
     : undefined;
+  const services = useServices();
+  const smartRenamePending = usePiSmartRenamePending(task.taskId);
   const openFeedbackSubmit = useFeedbackStore((state) => state.openSubmit);
   const {
     taskSessionFile,
@@ -1020,11 +1027,29 @@ export function TaskListItemContextMenuContent({
       onStartRenameTask={() => {
         onStartRenameTask(task.taskId, task.title);
       }}
+      onSmartRenameTask={() => {
+        void runSmartRenamePiSession({
+          services,
+          workspacePath: task.workspacePath || workspacePath,
+          workspaceIdentity: task.workspaceIdentity,
+          sessionId: task.taskId,
+          currentTitle: taskTitle,
+        });
+      }}
+      smartRenamePending={smartRenamePending}
       onArchiveTask={() => {
         onArchiveTask(task.taskId);
       }}
       onMarkTaskAsUnread={() => {
         onMarkTaskAsUnread(task.taskId);
+      }}
+      onDeleteTask={() => {
+        requestDeletePiSession({
+          workspacePath: task.workspacePath || workspacePath,
+          workspaceIdentity: task.workspaceIdentity,
+          taskId: task.taskId,
+          title: taskTitle,
+        });
       }}
       onOpenTaskFeedback={() => {
         void handleOpenTaskFeedback();
@@ -1049,14 +1074,6 @@ export function TaskListItemContextMenuContent({
       }}
       onCopySessionId={() => {
         void handleCopyText(intl.formatMessage({ id: "appHeader.copySessionId" }), task.taskId);
-      }}
-      onViewModelTrajectory={() => {
-        // 通过单例 store 把“打开轨迹”请求交给所属 workspace 的侧边栏控制器（useAppPanels）。
-        useModelTrajectoryStore.getState().requestOpen({
-          taskId: task.taskId,
-          workspaceKey: task.workspaceIdentity?.trim() || workspacePath,
-          title: taskTitle,
-        });
       }}
       onOpenProviderConfig={() => {
         void handleOpenProviderConfig();

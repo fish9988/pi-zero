@@ -1,4 +1,5 @@
 import { useInterfaceModeTelemetry } from "@/lib/appTelemetry.js";
+import { PiDeleteSessionDialog } from "@/pi-conversation/index.js";
 import { ProjectDirectoryProvider } from "@/project-sidebar/ProjectDirectoryProvider.js";
 import { DataSyncDialogProvider } from "@/data-sync/index.js";
 import { RemoteProjectPicker } from "@/project-sidebar/RemoteProjectPicker.js";
@@ -1683,6 +1684,7 @@ function RootInner({
         )}
         {onboardingDialog}
       </OccupationOnboarding>
+      <PiDeleteSessionDialog />
     </RootShell>
   );
 }

@@ -72,6 +72,7 @@ modules:
     managed: true
     requires:
       - pi-config-protocol
+      - pi-conversation-ui
       - provider
       - services
       - shared
@@ -374,6 +375,7 @@ modules:
       - managed-worktree-ui
       - task-row-hover
       - extension-slots
+      - pi-conversation-ui
     publicEntrypoints:
       - packages/ui/src/project-sidebar/index.tsx
       - packages/ui/src/project-sidebar/contract.ts

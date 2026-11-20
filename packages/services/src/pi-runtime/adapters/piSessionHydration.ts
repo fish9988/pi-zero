@@ -333,3 +333,25 @@ export function createPiWorkspaceBucket(
     commandAckCache: new Map(),
   };
 }
+
+export async function disposePiWorkspaceBucket(
+  bucket: PiWorkspaceBucket,
+  onUnavailable: () => void,
+): Promise<void> {
+  bucket.disposed = true;
+  bucket.watcherDispose?.();
+  bucket.watcherDispose = null;
+  for (const timer of bucket.deferredTimers) clearTimeout(timer);
+  bucket.deferredTimers.clear();
+  const controllers = [...bucket.sessions.values()];
+  bucket.sessions.clear();
+  bucket.diskSessions.clear();
+  bucket.sessionsIndexSubs.clear();
+  bucket.workspaceConfigSubs.clear();
+  onUnavailable();
+  await Promise.all(controllers.map((controller) => controller.disposeAndWait()));
+  bucket.conversationFrameEmitter.dispose();
+  bucket.sessionsIndexFrameEmitter.dispose();
+  bucket.workspaceConfigFrameEmitter.dispose();
+  bucket.sessionLifecycleEmitter.dispose();
+}

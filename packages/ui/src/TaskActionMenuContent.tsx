@@ -1,5 +1,6 @@
 interface TaskActionMenuItemProps {
   children: React.ReactNode;
+  className?: string;
   "data-testid"?: string;
   disabled?: boolean;
   onSelect?: () => void;
@@ -29,8 +30,11 @@ export function TaskActionMenuContent({
   Separator,
   onTogglePinTask,
   onStartRenameTask,
+  onSmartRenameTask,
+  smartRenamePending = false,
   onArchiveTask,
   onMarkTaskAsUnread,
+  onDeleteTask,
   onRestartTask,
   restartPending = false,
   onOpenTaskFeedback: _onOpenTaskFeedback,
@@ -71,9 +75,12 @@ export function TaskActionMenuContent({
   Separator: React.ComponentType<TaskActionMenuSeparatorProps>;
   onTogglePinTask: () => void;
   onStartRenameTask: () => void;
+  onSmartRenameTask?: () => void;
+  smartRenamePending?: boolean;
   /** 不传则不展示归档项：Header 拿不到实时运行态，归档只在侧栏提供。 */
   onArchiveTask?: () => void;
   onMarkTaskAsUnread: () => void;
+  onDeleteTask?: () => void;
   onRestartTask?: () => void;
   restartPending?: boolean;
   onOpenTaskFeedback?: () => void;
@@ -115,6 +122,20 @@ export function TaskActionMenuContent({
       >
         {intl.formatMessage({ id: "taskList.rename" })}
       </Item>
+      {onSmartRenameTask ? (
+        <Item
+          data-testid="task-smart-rename"
+          disabled={taskTargetActionsDisabled || smartRenamePending}
+          title={disabledReason}
+          onSelect={() => {
+            if (!taskTargetActionsDisabled && !smartRenamePending) {
+              onSmartRenameTask();
+            }
+          }}
+        >
+          {smartRenamePending ? "正在智能重命名…" : "智能重命名"}
+        </Item>
+      ) : null}
       {onArchiveTask ? (
         <Item
           disabled={taskTargetActionsDisabled || Boolean(archiveDisabledReason)}
@@ -271,6 +292,24 @@ export function TaskActionMenuContent({
             onSelect={onViewModelTrajectory}
           >
             {intl.formatMessage({ id: "taskList.viewModelTrajectory" })}
+          </Item>
+        </>
+      ) : null}
+      {onDeleteTask ? (
+        <>
+          <Separator />
+          <Item
+            data-testid="task-delete-session"
+            className="text-destructive focus:text-destructive"
+            disabled={taskTargetActionsDisabled || !activeSessionId}
+            title={taskTargetActionsDisabled ? disabledReason : undefined}
+            onSelect={() => {
+              if (!taskTargetActionsDisabled && activeSessionId) {
+                onDeleteTask();
+              }
+            }}
+          >
+            删除会话
           </Item>
         </>
       ) : null}

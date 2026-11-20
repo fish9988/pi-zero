@@ -204,4 +204,12 @@ export type PiAgentService = IZCodeAgentService & {
   listAllPiSessions?(): Promise<readonly PiDiscoveredSessionRecord[]>;
   /** 内部协作辅助：监听 `~/.pi/agent/sessions` 磁盘变更及内存 Pi 会话发布/删除，返回幂等清理函数。 */
   watchAllPiSessions?(onChange: () => void): () => void;
+  /** 内部协作辅助：强制停止活跃子进程并从 Hub 内存与磁盘索引移除会话，返回已知的 `.jsonl` 路径。 */
+  removeSessionFromHub?(workspacePath: string, sessionId: string): Promise<string | null>;
+  /** 内部协作辅助：同步外部（如智能重命名）生成的会话标题到内存控制器与活跃 Pi RPC 客户端。 */
+  applyExternalSessionTitle?(
+    workspacePath: string,
+    sessionId: string,
+    title: string,
+  ): Promise<boolean>;
 };

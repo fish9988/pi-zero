@@ -339,6 +339,7 @@ import {
   parsePiLocalSlashCommand,
   PiConversationOverlays,
   subscribePiConversationAction,
+  usePiAutoSmartRename,
 } from "@/pi-conversation/index.js";
 import { usePiSubagentPreferences } from "@/settings/pi/index.js";
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
@@ -3523,6 +3524,12 @@ export function SessionPane({
     async () => undefined,
   );
   const effectiveSessionId = sessionId ?? recoveringDraft?.sessionId ?? prewarmSessionId;
+  usePiAutoSmartRename({
+    workspacePath,
+    workspaceIdentity,
+    sessionId: effectiveSessionId,
+    snapshot,
+  });
   const pluginUiRuntimeReady = Boolean(
     effectiveSessionId &&
     lease?.sessionId === effectiveSessionId &&

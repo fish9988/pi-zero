@@ -4,7 +4,7 @@
  */
 export const piSettingsUiModule = {
   id: "pi-settings-ui",
-  requires: ["pi-config-protocol", "provider", "services", "shared", "ui"],
+  requires: ["pi-config-protocol", "pi-conversation-ui", "provider", "services", "shared", "ui"],
   provides: ["pi-settings-ui"],
   publicEntrypoints: ["index.ts", "contract.ts"],
 } as const;

@@ -55,6 +55,12 @@ import type {
   WorkspaceHeaderTitleSectionProps,
 } from "@/WorkspaceHeaderSections/shared.js";
 import { applyTaskQueryCacheMutation } from "@/store/taskQueryCacheStore.js";
+import {
+  persistManualPiSessionTitle,
+  requestDeletePiSession,
+  runSmartRenamePiSession,
+  usePiSmartRenamePending,
+} from "@/pi-conversation/index.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
 import {
@@ -160,6 +166,7 @@ export function WorkspaceHeaderTitleSection({
     activeTaskId && pinnedTasks.some((task) => task.taskId === activeTaskId),
   );
   const resolvedTaskActionTaskId = activeTaskMeta?.taskId ?? activeTaskId;
+  const smartRenamePending = usePiSmartRenamePending(resolvedTaskActionTaskId);
   // 新建任务在第一次写入数据库前没有稳定 taskId。
   // 之前 Header 更多菜单虽然点击后会被回调里的空 id guard 拦住，但 UI 仍显示为可点，
   // 用户会感知成“菜单无响应”；这里只禁用依赖已落库 task 的动作，保留 workspace 级入口。
@@ -345,6 +352,11 @@ export function WorkspaceHeaderTitleSection({
         workspacePath: workspaceAbsPath,
         title: normalizedTitle,
         ...(workspaceIdentity ? { workspaceIdentity } : {}),
+      });
+      persistManualPiSessionTitle(services, {
+        workspacePath: workspaceAbsPath,
+        sessionId: renamingTaskId,
+        title: normalizedTitle,
       });
       upsertOptimisticTaskListItem(workspaceAbsPath, renamedTask, workspaceIdentity);
       applyTaskQueryCacheMutation({
@@ -629,6 +641,33 @@ export function WorkspaceHeaderTitleSection({
                     });
                 }}
                 onStartRenameTask={handleStartRenameTask}
+                onSmartRenameTask={
+                  resolvedTaskActionTaskId
+                    ? () => {
+                        void runSmartRenamePiSession({
+                          services,
+                          workspacePath: workspaceAbsPath,
+                          workspaceIdentity,
+                          sessionId: resolvedTaskActionTaskId,
+                          currentTitle: activeTaskMeta?.title ?? activeTaskTitle ?? "",
+                        });
+                      }
+                    : undefined
+                }
+                smartRenamePending={smartRenamePending}
+                onDeleteTask={
+                  resolvedTaskActionTaskId
+                    ? () => {
+                        requestDeletePiSession({
+                          workspacePath: workspaceAbsPath,
+                          workspaceIdentity,
+                          taskId: resolvedTaskActionTaskId,
+                          title:
+                            activeTaskMeta?.title ?? activeTaskTitle ?? resolvedTaskActionTaskId,
+                        });
+                      }
+                    : undefined
+                }
                 onMarkTaskAsUnread={() => {
                   if (!resolvedTaskActionTaskId) {
                     return;

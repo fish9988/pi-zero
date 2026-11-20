@@ -40,6 +40,11 @@ import {
   renderPiSessionToHtml,
 } from "../domain/piSessionTreeAndExport.js";
 import { atomicWritePiFile, enqueuePiFileWrite } from "./piAtomicFile.js";
+import {
+  deletePiSessionOnDisk,
+  persistPiSessionTitle,
+  runPiSmartRename,
+} from "./piSessionSmartOps.js";
 
 export {
   inspectPiRuntimeStatus,
@@ -266,6 +271,35 @@ export async function executePiSessionEcosystemAction(
   }
 
   const platform = deps.platform ?? process.platform;
+  const smartOpsDeps = {
+    agentDir: deps.agentDir,
+    managedRuntimeDir: deps.managedRuntimeDir,
+    env: deps.env,
+    platform,
+    agentService: deps.agentService,
+    resolveSessionFile: (workspacePath: string, sessionId: string) =>
+      resolveSessionJsonlFile({
+        workspacePath,
+        sessionId,
+        agentService: deps.agentService,
+        env: deps.env,
+        platform,
+      }),
+  };
+
+  if (op.op === "smartRename") {
+    const result = await runPiSmartRename(op, smartOpsDeps);
+    return { op: "smartRename", result };
+  }
+  if (op.op === "persistTitle") {
+    const persisted = await persistPiSessionTitle(op, smartOpsDeps);
+    return { op: "persistTitle", persisted };
+  }
+  if (op.op === "deleteSession") {
+    const result = await deletePiSessionOnDisk(op, smartOpsDeps);
+    return { op: "deleteSession", result };
+  }
+
   const sessionFile = await resolveSessionJsonlFile({
     workspacePath: op.workspacePath,
     sessionId: op.sessionId,

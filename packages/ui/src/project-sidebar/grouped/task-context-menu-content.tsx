@@ -24,8 +24,11 @@ export function GroupedTaskContextMenuContent({
   onMoveTaskToGroup,
   onMoveTaskToTop,
   onStartRenameTask,
+  onSmartRenameTask,
+  smartRenamePending = false,
   onArchiveTask,
   onMarkTaskAsUnread,
+  onDeleteTask,
   onOpenTaskPathInFileManager,
   onCopyText,
   onOpenProviderConfig,
@@ -46,8 +49,11 @@ export function GroupedTaskContextMenuContent({
   onMoveTaskToGroup: (task: ZCodeTaskMeta, groupId: string | null) => void;
   onMoveTaskToTop: (task: ZCodeTaskMeta) => void;
   onStartRenameTask: (task: ZCodeTaskMeta) => void;
+  onSmartRenameTask?: (task: ZCodeTaskMeta) => void;
+  smartRenamePending?: boolean;
   onArchiveTask: (task: ZCodeTaskMeta) => void;
   onMarkTaskAsUnread: (task: ZCodeTaskMeta) => void;
+  onDeleteTask?: (task: ZCodeTaskMeta) => void;
   onOpenTaskPathInFileManager: () => void;
   onCopyText: (label: string, text: string | null) => void;
   onOpenProviderConfig: () => void;
@@ -130,6 +136,22 @@ export function GroupedTaskContextMenuContent({
           {intl.formatMessage({ id: "taskList.rename" })}
         </ContextMenuItem>
       </SidebarNativeTooltip>
+      {onSmartRenameTask ? (
+        <SidebarNativeTooltip>
+          <ContextMenuItem
+            data-testid="task-smart-rename"
+            disabled={Boolean(disabledReason) || smartRenamePending}
+            title={disabledReason}
+            onSelect={() => {
+              if (!disabledReason && !smartRenamePending) {
+                onSmartRenameTask(task);
+              }
+            }}
+          >
+            {smartRenamePending ? "正在智能重命名…" : "智能重命名"}
+          </ContextMenuItem>
+        </SidebarNativeTooltip>
+      ) : null}
       <SidebarNativeTooltip>
         <ContextMenuItem
           disabled={Boolean(disabledReason) || Boolean(archiveDisabledReason)}
@@ -211,6 +233,26 @@ export function GroupedTaskContextMenuContent({
           {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
         </span>
       </ContextMenuItem>
+      {onDeleteTask ? (
+        <>
+          <ContextMenuSeparator />
+          <SidebarNativeTooltip>
+            <ContextMenuItem
+              data-testid="task-delete-session"
+              className="text-destructive focus:text-destructive"
+              disabled={Boolean(disabledReason)}
+              title={disabledReason}
+              onSelect={() => {
+                if (!disabledReason) {
+                  onDeleteTask(task);
+                }
+              }}
+            >
+              删除会话
+            </ContextMenuItem>
+          </SidebarNativeTooltip>
+        </>
+      ) : null}
     </ContextMenuContent>
   );
 }

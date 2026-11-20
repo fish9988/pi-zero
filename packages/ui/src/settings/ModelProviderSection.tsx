@@ -45,6 +45,7 @@ import {
 import { ModelProviderSectionDetail } from "./model-provider-section/Detail.js";
 import { ModelProviderSectionLayout } from "./model-provider-section/SectionLayout.js";
 import { DefaultModelAndOfficialPlanBar } from "@/custom-appearance/index.js";
+import { PiSmartRenameSettingsCard } from "@/settings/pi/index.js";
 import { ProviderTemplatePicker } from "./model-provider-section/ProviderTemplatePicker.js";
 import type { CodingPlanLoginOptions } from "./model-provider-section/codingPlanPricingCards.js";
 import { useModelProviderNavigation } from "./model-provider-section/useModelProviderNavigation.js";
@@ -1172,7 +1173,12 @@ export function ModelProviderSection({
       onSelectNavItem={handleSelectNavItem}
       onReorderProviderIds={handleReorderProviderIds}
       reorderableProviderIds={reorderableProviderIds}
-      headerSlot={<DefaultModelAndOfficialPlanBar />}
+      headerSlot={
+        <div className="space-y-4">
+          <DefaultModelAndOfficialPlanBar />
+          <PiSmartRenameSettingsCard />
+        </div>
+      }
     >
       {(invalidProviderTarget || navigationUnavailable) && !templatePickerOpen ? (
         <p role="alert" className="mb-3 text-ui-base text-destructive">

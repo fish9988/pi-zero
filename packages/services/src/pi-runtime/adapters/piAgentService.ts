@@ -562,5 +562,13 @@ export function createPiAgentService(options: CreatePiAgentServiceOptions = {}):
     watchAllPiSessions(onChange) {
       return hub.watchAllPiSessions(onChange);
     },
+
+    async removeSessionFromHub(workspacePath, sessionId) {
+      return hub.removeSessionFromHub({ workspacePath }, sessionId);
+    },
+
+    async applyExternalSessionTitle(workspacePath, sessionId, title) {
+      return hub.applyExternalSessionTitle({ workspacePath }, sessionId, title);
+    },
   };
 }
