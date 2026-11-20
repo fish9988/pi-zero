@@ -34,6 +34,10 @@ jobs:
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
 
     steps:
+      - name: Disable Git CRLF conversion
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
