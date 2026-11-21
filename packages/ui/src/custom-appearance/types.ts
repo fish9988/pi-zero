@@ -11,6 +11,13 @@ export interface CustomThemeColorOverrides {
   foreground: string;
   foregroundSubtle: string;
   border: string;
+  /** 聊天 Markdown 语义层级色 */
+  markdownHeading: string;
+  markdownStrong: string;
+  markdownLink: string;
+  markdownCodeText: string;
+  markdownCodeBg: string;
+  markdownQuote: string;
 }
 
 export interface CustomWallpaperConfig {

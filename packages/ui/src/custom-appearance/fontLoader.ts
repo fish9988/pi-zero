@@ -104,8 +104,7 @@ export const FALLBACK_MONO_FONTS = [
 function classifyFont(family: string): LocalFontEntry {
   const lower = family.toLowerCase();
   const hasCjkChar = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(family);
-  const isLikelyCjk =
-    hasCjkChar || CJK_FONT_NAME_HINTS.some((hint) => lower.includes(hint));
+  const isLikelyCjk = hasCjkChar || CJK_FONT_NAME_HINTS.some((hint) => lower.includes(hint));
   const isLikelyMono = MONO_FONT_NAME_HINTS.some((hint) => lower.includes(hint));
   return { family, isLikelyCjk, isLikelyMono };
 }
@@ -156,23 +155,62 @@ export async function querySystemLocalFonts(): Promise<{
   }
 }
 
+/** 仅覆盖西文/数字/常用符号，显式排除 CJK 汉字与中文标点，确保西文字体绝不劫持中文字体。 */
+export const WESTERN_UNICODE_RANGE =
+  "U+0000-00FF, U+0100-024F, U+0250-02AF, U+0370-03FF, U+2000-206F, U+2070-209F, U+20A0-20CF, U+2100-218F, U+2190-21FF, U+2200-22FF, U+2500-257F";
+
+function escapeCssFontName(name: string): string {
+  return name.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function quoteCssFontFamily(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  if (/^[a-z-]+$/i.test(trimmed)) return trimmed;
+  return `"${escapeCssFontName(trimmed)}"`;
+}
+
 export function buildCssFontStack(
   westernFamily: string,
   cjkFamily: string,
   fallbackStack: string,
 ): string {
   const parts: string[] = [];
-  const quote = (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return "";
-    if (/^[a-z-]+$/i.test(trimmed)) return trimmed;
-    return `"${trimmed.replace(/"/g, '\\"')}"`;
-  };
-
-  const west = quote(westernFamily);
-  const cjk = quote(cjkFamily);
+  const west = quoteCssFontFamily(westernFamily);
+  const cjk = quoteCssFontFamily(cjkFamily);
   if (west) parts.push(west);
   if (cjk && cjk !== west) parts.push(cjk);
   parts.push(fallbackStack);
   return parts.join(", ");
+}
+
+/**
+ * 为「西文字体 + 中文字体」生成真正互不干扰的双语字体规则：
+ * - 当同时指定了不同的西文字体与中文字体时，通过 `@font-face` + `unicode-range` 将西文字体严格限定在拉丁/数字/符号区间；
+ * - 即使所选西文字体本身包含中文字形（如更纱、思源、微软雅黑等），汉字也会强制跳过它并命中中文字体。
+ */
+export function buildDualScriptFontCss(
+  aliasName: string,
+  westernFamily: string,
+  cjkFamily: string,
+  fallbackStack: string,
+): { readonly fontFacesCss: string; readonly stack: string } {
+  const westTrimmed = westernFamily.trim();
+  const cjkTrimmed = cjkFamily.trim();
+  if (!westTrimmed || !cjkTrimmed || westTrimmed === cjkTrimmed) {
+    return {
+      fontFacesCss: "",
+      stack: buildCssFontStack(westTrimmed, cjkTrimmed, fallbackStack),
+    };
+  }
+  const escaped = escapeCssFontName(westTrimmed);
+  const alias = `"${escapeCssFontName(aliasName)}"`;
+  const fontFacesCss = [
+    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped}");\n  font-weight: 100 599;\n  font-style: normal;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
+    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Bold"), local("${escaped}-Bold"), local("${escaped} SemiBold"), local("${escaped}");\n  font-weight: 600 900;\n  font-style: normal;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
+    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Italic"), local("${escaped}-Italic"), local("${escaped}");\n  font-weight: 100 599;\n  font-style: italic;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
+    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Bold Italic"), local("${escaped}-BoldItalic"), local("${escaped} Bold"), local("${escaped}");\n  font-weight: 600 900;\n  font-style: italic;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
+  ].join("\n");
+  const stack = [alias, quoteCssFontFamily(cjkTrimmed), fallbackStack].filter(Boolean).join(", ");
+  return { fontFacesCss, stack };
 }

@@ -39,16 +39,25 @@ function normalizeColors(
   fallback: CustomThemeColorOverrides,
 ): CustomThemeColorOverrides {
   if (!isRecord(raw)) return { ...fallback };
+  const brand = readString(raw.brand, fallback.brand);
+  const foreground = readString(raw.foreground, fallback.foreground);
+  const foregroundSubtle = readString(raw.foregroundSubtle, fallback.foregroundSubtle);
   return {
     background: readString(raw.background, fallback.background),
     sidebar: readString(raw.sidebar, fallback.sidebar),
     card: readString(raw.card, fallback.card),
     input: readString(raw.input, fallback.input),
     userBubble: readString(raw.userBubble, fallback.userBubble),
-    brand: readString(raw.brand, fallback.brand),
-    foreground: readString(raw.foreground, fallback.foreground),
-    foregroundSubtle: readString(raw.foregroundSubtle, fallback.foregroundSubtle),
+    brand,
+    foreground,
+    foregroundSubtle,
     border: readString(raw.border, fallback.border),
+    markdownHeading: readString(raw.markdownHeading, fallback.markdownHeading || foreground),
+    markdownStrong: readString(raw.markdownStrong, fallback.markdownStrong || foreground),
+    markdownLink: readString(raw.markdownLink, brand || fallback.markdownLink),
+    markdownCodeText: readString(raw.markdownCodeText, fallback.markdownCodeText),
+    markdownCodeBg: readString(raw.markdownCodeBg, fallback.markdownCodeBg),
+    markdownQuote: readString(raw.markdownQuote, foregroundSubtle || fallback.markdownQuote),
   };
 }
 
@@ -92,8 +101,18 @@ export function normalizeCustomAppearanceConfig(raw: unknown): CustomAppearanceC
       enabled: readBoolean(rawWallpaper.enabled, def.wallpaper.enabled),
       imageUrl: readString(rawWallpaper.imageUrl, def.wallpaper.imageUrl),
       blurPx: readNumber(rawWallpaper.blurPx, def.wallpaper.blurPx, 0, 40),
-      overlayOpacity: readNumber(rawWallpaper.overlayOpacity, def.wallpaper.overlayOpacity, 0.2, 0.96),
-      surfaceOpacity: readNumber(rawWallpaper.surfaceOpacity, def.wallpaper.surfaceOpacity, 0.45, 1),
+      overlayOpacity: readNumber(
+        rawWallpaper.overlayOpacity,
+        def.wallpaper.overlayOpacity,
+        0.2,
+        0.96,
+      ),
+      surfaceOpacity: readNumber(
+        rawWallpaper.surfaceOpacity,
+        def.wallpaper.surfaceOpacity,
+        0.45,
+        1,
+      ),
     },
     fonts: {
       enabled: readBoolean(rawFonts.enabled, def.fonts.enabled),
@@ -167,11 +186,7 @@ interface CustomAppearanceState {
   config: CustomAppearanceConfig;
   safeModeActive: boolean;
   updateConfig: (updater: (prev: CustomAppearanceConfig) => CustomAppearanceConfig) => void;
-  setColor: (
-    mode: CustomBaseMode,
-    key: keyof CustomThemeColorOverrides,
-    value: string,
-  ) => void;
+  setColor: (mode: CustomBaseMode, key: keyof CustomThemeColorOverrides, value: string) => void;
   applyPreset: (presetId: string) => CustomBaseMode | null;
   setChatMaxWidthPx: (widthPx: number | null) => void;
   toggleSafeMode: (force?: boolean) => void;
@@ -195,10 +210,8 @@ export const useCustomAppearanceStore = create<CustomAppearanceState>((set, get)
       ...prev,
       activePresetId: "custom",
       enableCustomColors: true,
-      lightColors:
-        mode === "light" ? { ...prev.lightColors, [key]: value } : prev.lightColors,
-      darkColors:
-        mode === "dark" ? { ...prev.darkColors, [key]: value } : prev.darkColors,
+      lightColors: mode === "light" ? { ...prev.lightColors, [key]: value } : prev.lightColors,
+      darkColors: mode === "dark" ? { ...prev.darkColors, [key]: value } : prev.darkColors,
     }));
   },
 

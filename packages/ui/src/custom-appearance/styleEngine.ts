@@ -1,4 +1,4 @@
-import { buildCssFontStack } from "./fontLoader.js";
+import { buildDualScriptFontCss } from "./fontLoader.js";
 import type { CustomAppearanceConfig, CustomBaseMode } from "./types.js";
 
 const VARS_STYLE_ID = "zcode-custom-appearance-vars";
@@ -8,7 +8,7 @@ const WALLPAPER_LAYER_ID = "zcode-custom-wallpaper-layer";
 const DEFAULT_SANS_FALLBACK =
   'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif';
 const DEFAULT_MONO_FALLBACK =
-  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Microsoft YaHei UI", "PingFang SC", monospace';
+  '"Cascadia Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Microsoft YaHei UI", "PingFang SC", monospace';
 
 function hexToSurfaceColor(hexOrCss: string, opacity: number): string {
   const pct = Math.round(Math.min(1, Math.max(0.2, opacity)) * 100);
@@ -106,10 +106,24 @@ function buildAppearanceCss(config: CustomAppearanceConfig, resolvedMode: Custom
         `--color-input-border-focused: ${palette.brand};`,
         `--color-selected: color-mix(in srgb, ${palette.brand} 14%, transparent);`,
         `--color-accent: color-mix(in srgb, ${palette.brand} 12%, transparent);`,
+        `--color-markdown-heading: ${palette.markdownHeading};`,
+        `--color-markdown-strong: ${palette.markdownStrong};`,
+        `--color-markdown-link: ${palette.markdownLink};`,
+        `--color-markdown-inline-code-fg: ${palette.markdownCodeText};`,
+        `--color-markdown-inline-code-bg: ${palette.markdownCodeBg};`,
+        `--color-markdown-quote: ${palette.markdownQuote};`,
       );
     }
 
-    blocks.push(`:root:root, :root.theme-zai-light, :root.theme-zai-dark {\n  ${colorVars.join("\n  ")}\n}`);
+    blocks.push(
+      `:root:root, :root.theme-zai-light, :root.theme-zai-dark {\n  ${colorVars.join("\n  ")}\n}`,
+    );
+
+    if (config.enableCustomColors) {
+      blocks.push(
+        `[data-conversation-selectable="true"] :is(h1, h2, h3, h4, h5, h6) {\n  color: var(--color-markdown-heading);\n}\n[data-conversation-selectable="true"] :is(strong, b) {\n  color: var(--color-markdown-strong);\n}\n[data-conversation-selectable="true"] a {\n  color: var(--color-markdown-link);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  color: var(--color-markdown-inline-code-fg);\n  background-color: var(--color-markdown-inline-code-bg);\n}\n[data-conversation-selectable="true"] blockquote {\n  color: var(--color-markdown-quote);\n  border-left-color: color-mix(in srgb, var(--color-markdown-quote) 48%, var(--color-border));\n  background-color: color-mix(in srgb, var(--color-markdown-quote) 5%, transparent);\n  border-radius: 0 6px 6px 0;\n}\n[data-conversation-selectable="true"] :is(ul, ol) > li::marker {\n  color: var(--color-markdown-quote);\n}\n[data-conversation-selectable="true"] th {\n  color: var(--color-markdown-heading);\n  background-color: color-mix(in srgb, var(--color-foreground) 4%, transparent);\n}`,
+      );
+    }
   }
 
   if (config.enableCustomColors && config.designLanguage !== "default") {
@@ -141,6 +155,7 @@ function buildAppearanceCss(config: CustomAppearanceConfig, resolvedMode: Custom
   }
 
   if (config.fonts.enabled) {
+    const fontFaceBlocks: string[] = [];
     const uiHasCustom =
       config.fonts.ui.westernFamily.trim() !== "" || config.fonts.ui.cjkFamily.trim() !== "";
     const chatHasCustom =
@@ -148,57 +163,63 @@ function buildAppearanceCss(config: CustomAppearanceConfig, resolvedMode: Custom
     const monoHasCustom =
       config.fonts.mono.westernFamily.trim() !== "" || config.fonts.mono.cjkFamily.trim() !== "";
 
+    const uiDual = uiHasCustom
+      ? buildDualScriptFontCss(
+          "__pizero_ui_west",
+          config.fonts.ui.westernFamily,
+          config.fonts.ui.cjkFamily,
+          DEFAULT_SANS_FALLBACK,
+        )
+      : { fontFacesCss: "", stack: DEFAULT_SANS_FALLBACK };
+    if (uiDual.fontFacesCss) fontFaceBlocks.push(uiDual.fontFacesCss);
+
     if (uiHasCustom || config.fonts.ui.weight !== 400) {
-      const uiStack = uiHasCustom
-        ? buildCssFontStack(
-            config.fonts.ui.westernFamily,
-            config.fonts.ui.cjkFamily,
-            DEFAULT_SANS_FALLBACK,
-          )
-        : DEFAULT_SANS_FALLBACK;
       blocks.push(
-        `:root:root {\n  --font-sans: ${uiStack};\n}\nbody, #root {\n  font-family: ${uiStack};\n  font-weight: ${config.fonts.ui.weight};\n}`,
+        `:root:root {\n  --font-sans: ${uiDual.stack};\n}\nbody, #root {\n  font-family: ${uiDual.stack};\n  font-weight: ${config.fonts.ui.weight};\n}`,
       );
     }
 
     if (monoHasCustom || config.fonts.mono.weight !== 400) {
-      const monoStack = monoHasCustom
-        ? buildCssFontStack(
+      const monoDual = monoHasCustom
+        ? buildDualScriptFontCss(
+            "__pizero_mono_west",
             config.fonts.mono.westernFamily,
             config.fonts.mono.cjkFamily,
             DEFAULT_MONO_FALLBACK,
           )
-        : DEFAULT_MONO_FALLBACK;
+        : { fontFacesCss: "", stack: DEFAULT_MONO_FALLBACK };
+      if (monoDual.fontFacesCss) fontFaceBlocks.push(monoDual.fontFacesCss);
       blocks.push(
-        `:root:root {\n  --font-mono: ${monoStack};\n}\ncode, pre, kbd, samp, .font-mono {\n  font-family: ${monoStack};\n  font-weight: ${config.fonts.mono.weight};\n}`,
+        `:root:root {\n  --font-mono: ${monoDual.stack};\n}\ncode, pre, kbd, samp, .font-mono {\n  font-family: ${monoDual.stack};\n  font-weight: ${config.fonts.mono.weight};\n}`,
       );
     }
 
-    const chatStack = chatHasCustom
-      ? buildCssFontStack(
+    const chatDual = chatHasCustom
+      ? buildDualScriptFontCss(
+          "__pizero_chat_west",
           config.fonts.chat.westernFamily,
           config.fonts.chat.cjkFamily,
-          uiHasCustom
-            ? buildCssFontStack(
-                config.fonts.ui.westernFamily,
-                config.fonts.ui.cjkFamily,
-                DEFAULT_SANS_FALLBACK,
-              )
-            : DEFAULT_SANS_FALLBACK,
+          uiDual.stack,
         )
-      : "";
+      : { fontFacesCss: "", stack: "" };
+    if (chatDual.fontFacesCss) fontFaceBlocks.push(chatDual.fontFacesCss);
+
+    if (fontFaceBlocks.length > 0) {
+      blocks.unshift(fontFaceBlocks.join("\n"));
+    }
 
     const chatProps: string[] = [
       `font-size: ${config.fonts.chat.fontSizePx}px;`,
       `line-height: ${config.fonts.chat.lineHeight};`,
       `font-weight: ${config.fonts.chat.weight};`,
     ];
-    if (chatStack) {
-      chatProps.unshift(`font-family: ${chatStack};`);
+    if (chatDual.stack) {
+      blocks.push(`:root:root {\n  --zcode-chat-font: ${chatDual.stack};\n}`);
+      chatProps.unshift(`font-family: ${chatDual.stack};`);
     }
 
     blocks.push(
-      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${Math.max(700, config.fonts.chat.weight)};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}`,
+      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${Math.max(700, config.fonts.chat.weight)};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  font-size: 0.9em;\n}`,
     );
   }
 

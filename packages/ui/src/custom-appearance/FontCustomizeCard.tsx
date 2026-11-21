@@ -160,12 +160,13 @@ export function FontCustomizeCard() {
     void loadLocalFonts();
   }, [loadLocalFonts]);
 
-  const allFamilies =
+  const westernTextOptions =
     localFonts.length > 0
-      ? localFonts.map((f) => f.family)
-      : Array.from(
-          new Set([...FALLBACK_CJK_FONTS, ...FALLBACK_WESTERN_FONTS, ...FALLBACK_MONO_FONTS]),
-        );
+      ? [
+          ...localFonts.filter((f) => !f.isLikelyCjk).map((f) => f.family),
+          ...localFonts.filter((f) => f.isLikelyCjk).map((f) => f.family),
+        ]
+      : Array.from(new Set([...FALLBACK_WESTERN_FONTS, ...FALLBACK_CJK_FONTS]));
 
   const cjkOptions =
     localFonts.length > 0
@@ -178,7 +179,8 @@ export function FontCustomizeCard() {
   const monoOptions =
     localFonts.length > 0
       ? [
-          ...localFonts.filter((f) => f.isLikelyMono).map((f) => f.family),
+          ...localFonts.filter((f) => f.isLikelyMono && !f.isLikelyCjk).map((f) => f.family),
+          ...localFonts.filter((f) => f.isLikelyMono && f.isLikelyCjk).map((f) => f.family),
           ...localFonts.filter((f) => !f.isLikelyMono).map((f) => f.family),
         ]
       : FALLBACK_MONO_FONTS;
@@ -196,7 +198,7 @@ export function FontCustomizeCard() {
   const previewMonoStack = buildCssFontStack(
     fonts.mono.westernFamily,
     fonts.mono.cjkFamily,
-    "ui-monospace, monospace",
+    '"Cascadia Mono", "JetBrains Mono", ui-monospace, monospace',
   );
 
   const hasCustomScope = (scope: FontScope): boolean => {
@@ -205,7 +207,7 @@ export function FontCustomizeCard() {
   };
 
   const activeConfig = fonts[activeScope];
-  const westernOptions = activeScope === "mono" ? monoOptions : allFamilies;
+  const westernOptions = activeScope === "mono" ? monoOptions : westernTextOptions;
   const westernPlaceholder =
     activeScope === "mono"
       ? "如 JetBrains Mono、Cascadia Code"
@@ -290,18 +292,31 @@ export function FontCustomizeCard() {
                 <div
                   className="text-foreground"
                   style={{
-                    fontFamily: activeScope === "ui" ? previewUiStack : previewChatStack,
+                    fontFamily:
+                      activeScope === "ui"
+                        ? `var(--font-sans, ${previewUiStack})`
+                        : `var(--zcode-chat-font, var(--font-sans, ${previewChatStack}))`,
                     fontSize: `${fonts.chat.fontSizePx}px`,
                     lineHeight: fonts.chat.lineHeight,
                     fontWeight: activeScope === "ui" ? fonts.ui.weight : fonts.chat.weight,
                   }}
                 >
-                  Aa Bb 字体预览 0123 · 中英混排清晰度与 <strong>粗体强调</strong> 效果
+                  Aa Bb 字体预览 0123 · 中英独立分域渲染与 <strong>粗体强调</strong>、
+                  <code
+                    className="rounded-[4px] bg-[var(--color-markdown-inline-code-bg,color-mix(in_srgb,var(--color-markdown-inline-code)_55%,transparent))] px-[0.35em] py-[0.08em] text-[0.9em] text-[var(--color-markdown-inline-code-fg,var(--color-foreground))]"
+                    style={{
+                      fontFamily: `var(--font-mono, ${previewMonoStack})`,
+                      fontWeight: fonts.mono.weight,
+                    }}
+                  >
+                    pi-fold
+                  </code>{" "}
+                  行内代码效果
                 </div>
                 <div
                   className="truncate text-ui-sm text-foreground-subtle"
                   style={{
-                    fontFamily: previewMonoStack,
+                    fontFamily: `var(--font-mono, ${previewMonoStack})`,
                     fontWeight: fonts.mono.weight,
                   }}
                 >

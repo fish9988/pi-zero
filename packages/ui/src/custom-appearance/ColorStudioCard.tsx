@@ -54,6 +54,18 @@ const COLOR_GROUPS: Array<{
       { key: "border", label: "分割与边框" },
     ],
   },
+  {
+    id: "markdown",
+    title: "聊天输出层级",
+    fields: [
+      { key: "markdownHeading", label: "标题文字 (H1–H6)" },
+      { key: "markdownStrong", label: "加粗强调" },
+      { key: "markdownLink", label: "超链接色" },
+      { key: "markdownCodeText", label: "行内代码字色" },
+      { key: "markdownCodeBg", label: "行内代码底色" },
+      { key: "markdownQuote", label: "引用与列表标记" },
+    ],
+  },
 ];
 
 function resolveReferencePalette(

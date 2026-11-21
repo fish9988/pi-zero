@@ -158,26 +158,28 @@ body {
  */
 :root:lang(ja) {
   --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "Noto Sans CJK JP",
-    "Noto Sans JP", "Microsoft YaHei UI", "PingFang SC", monospace;
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", "Microsoft YaHei UI",
+    "PingFang SC", monospace;
 }
 
 :root:lang(ko) {
   --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "Noto Sans KR",
-    "Microsoft YaHei UI", "PingFang SC", monospace;
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", "Noto Sans KR", "Microsoft YaHei UI", "PingFang SC", monospace;
 }
 
 /* === 主题变量 === */
 
 @theme {
-  /* 修复原因：Windows 的 Consolas 不含中文字形，Tailwind 默认栈最终会让中文落到宋体。
-   * 保留各平台西文等宽字体，并在通用 monospace 前显式加入各平台 CJK 无衬线字体。 */
+  /* 修复原因：Windows 的 Consolas 在 12-14px 下 x-height 偏矮且不含中文字形，Tailwind 默认栈最终会让中文落到宋体。
+   * 优先使用高 x-height 现代等宽字体（Cascadia Mono / JetBrains Mono），再回退系统等宽与 CJK 无衬线字体。 */
   --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", monospace;
+    "Cascadia Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Noto Sans CJK SC", monospace;
   /* 设置页直接恢复通用大字号会绕过 UI 字号体系；专用 token 保留默认 24px / 30px，并跟随界面字号缩放。 */
   --text-ui-settings-title: calc(var(--ui-font-size) + 10px);
   --text-ui-settings-title--line-height: calc(4 / 3);

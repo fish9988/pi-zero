@@ -443,7 +443,7 @@ const messageLinkSafety = { enabled: false } as const;
 // `decoration-dashed` 会把原有的细圆点下划线绘制成短线段；这里只改变下划线的
 // 出现时机，继续使用 `dotted` 保留原视觉形态。
 const messageLinkClassName =
-  "wrap-anywhere text-ui-base font-medium text-icon-blue no-underline decoration-dotted underline-offset-4 hover:underline";
+  "wrap-anywhere text-ui-base font-medium text-[var(--color-markdown-link,var(--color-icon-blue))] no-underline decoration-dotted underline-offset-4 hover:underline";
 // `items-center` 让 inline-flex 使用浏览器合成的基线，固定 top 偏移又会随平台字体产生漂移。
 // 改为由文字子项提供真实 baseline；图标只在链接自身行盒内居中，桌面和移动 Web 共用同一语义。
 const messageFileLinkClassName =
@@ -2180,7 +2180,7 @@ export const MessageResponse = memo(
             return (
               <code
                 className={cn(
-                  "rounded-md bg-markdown-inline-code/50 mx-0.5 px-1.5 py-0.5 font-mono text-ui-sm",
+                  "rounded-[4px] bg-[var(--color-markdown-inline-code-bg,color-mix(in_srgb,var(--color-markdown-inline-code)_55%,transparent))] px-[0.35em] py-[0.08em] font-mono text-[0.9em] leading-snug text-[var(--color-markdown-inline-code-fg,var(--color-foreground))] [box-decoration-break:clone]",
                   codeClassName,
                 )}
                 {...codeProps}
