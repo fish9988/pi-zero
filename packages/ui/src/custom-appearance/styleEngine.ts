@@ -1,5 +1,17 @@
 import { buildDualScriptFontCss } from "./fontLoader.js";
-import type { CustomAppearanceConfig, CustomBaseMode } from "./types.js";
+import type { ChatStrongWeight, CustomAppearanceConfig, CustomBaseMode } from "./types.js";
+
+/** 根据正文字重与用户粗体偏好计算实际粗体字重（auto 默认 400->600 半粗、500->700，兼顾高分屏对比度与克制感）。 */
+export function resolveChatStrongWeight(
+  baseWeight: number,
+  strongWeight: ChatStrongWeight,
+): number {
+  if (strongWeight === 600) return Math.max(600, baseWeight);
+  if (strongWeight === 700) return Math.max(700, baseWeight);
+  if (baseWeight <= 400) return 600;
+  if (baseWeight <= 500) return 700;
+  return Math.min(800, baseWeight + 100);
+}
 
 const VARS_STYLE_ID = "zcode-custom-appearance-vars";
 const USER_CSS_STYLE_ID = "zcode-custom-css";
@@ -208,18 +220,26 @@ function buildAppearanceCss(config: CustomAppearanceConfig, resolvedMode: Custom
       blocks.unshift(fontFaceBlocks.join("\n"));
     }
 
+    const resolvedStrongWeight = resolveChatStrongWeight(
+      config.fonts.chat.weight,
+      config.fonts.chat.strongWeight,
+    );
     const chatProps: string[] = [
       `font-size: ${config.fonts.chat.fontSizePx}px;`,
       `line-height: ${config.fonts.chat.lineHeight};`,
       `font-weight: ${config.fonts.chat.weight};`,
     ];
     if (chatDual.stack) {
-      blocks.push(`:root:root {\n  --zcode-chat-font: ${chatDual.stack};\n}`);
+      blocks.push(
+        `:root:root {\n  --zcode-chat-font: ${chatDual.stack};\n  --zcode-chat-strong-weight: ${resolvedStrongWeight};\n}`,
+      );
       chatProps.unshift(`font-family: ${chatDual.stack};`);
+    } else {
+      blocks.push(`:root:root {\n  --zcode-chat-strong-weight: ${resolvedStrongWeight};\n}`);
     }
 
     blocks.push(
-      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${Math.max(700, config.fonts.chat.weight)};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  font-size: 0.9em;\n}`,
+      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${resolvedStrongWeight};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  font-size: 0.9em;\n}`,
     );
   }
 

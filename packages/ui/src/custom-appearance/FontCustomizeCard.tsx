@@ -19,10 +19,14 @@ import {
   FALLBACK_MONO_FONTS,
   FALLBACK_WESTERN_FONTS,
   querySystemLocalFonts,
+  resolveFontCandidate,
   type LocalFontEntry,
   type LocalFontLoadStatus,
 } from "./fontLoader.js";
+import { BUILTIN_FONT_PAIRING_PRESETS } from "./presets.js";
 import { useCustomAppearanceStore } from "./store.js";
+import { resolveChatStrongWeight } from "./styleEngine.js";
+import type { ChatStrongWeight, FontPairingPreset } from "./types.js";
 
 type FontScope = "ui" | "chat" | "mono";
 
@@ -38,6 +42,12 @@ const WEIGHT_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 500, label: "500 适中" },
   { value: 600, label: "600 半粗" },
   { value: 700, label: "700 粗体" },
+];
+
+const STRONG_WEIGHT_OPTIONS: Array<{ value: ChatStrongWeight; label: string }> = [
+  { value: "auto", label: "自动（推荐 600）" },
+  { value: 600, label: "600 半粗" },
+  { value: 700, label: "700 标准粗体" },
 ];
 
 function FontFamilyField({
@@ -236,6 +246,37 @@ export function FontCustomizeCard() {
     }));
   };
 
+  const resolvedStrongWeight = resolveChatStrongWeight(fonts.chat.weight, fonts.chat.strongWeight);
+  const availableFamilyNames = loadStatus === "ready" ? localFonts.map((f) => f.family) : [];
+
+  const applyFontPairingPreset = (preset: FontPairingPreset) => {
+    updateConfig((prev) => ({
+      ...prev,
+      fonts: {
+        ...prev.fonts,
+        enabled: true,
+        ui: {
+          westernFamily: resolveFontCandidate(preset.ui.westernCandidates, availableFamilyNames),
+          cjkFamily: resolveFontCandidate(preset.ui.cjkCandidates, availableFamilyNames),
+          weight: preset.ui.weight,
+        },
+        chat: {
+          westernFamily: resolveFontCandidate(preset.chat.westernCandidates, availableFamilyNames),
+          cjkFamily: resolveFontCandidate(preset.chat.cjkCandidates, availableFamilyNames),
+          weight: preset.chat.weight,
+          strongWeight: preset.chat.strongWeight,
+          fontSizePx: preset.chat.fontSizePx,
+          lineHeight: preset.chat.lineHeight,
+        },
+        mono: {
+          westernFamily: resolveFontCandidate(preset.mono.westernCandidates, availableFamilyNames),
+          cjkFamily: resolveFontCandidate(preset.mono.cjkCandidates, availableFamilyNames),
+          weight: preset.mono.weight,
+        },
+      },
+    }));
+  };
+
   return (
     <Card className="overflow-hidden rounded-xl border border-border bg-card py-0 shadow-none">
       <CardContent className="space-y-0 px-0">
@@ -285,7 +326,7 @@ export function FontCustomizeCard() {
                 </span>
                 <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">
                   {fonts.chat.fontSizePx}px · 行距 {fonts.chat.lineHeight.toFixed(2)} · W
-                  {activeConfig.weight}
+                  {activeConfig.weight} / B{resolvedStrongWeight}
                 </span>
               </div>
               <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-3.5 py-2.5">
@@ -301,7 +342,9 @@ export function FontCustomizeCard() {
                     fontWeight: activeScope === "ui" ? fonts.ui.weight : fonts.chat.weight,
                   }}
                 >
-                  Aa Bb 字体预览 0123 · 中英独立分域渲染与 <strong>粗体强调</strong>、
+                  Aa Bb 2026 · 普通正文与{" "}
+                  <strong style={{ fontWeight: resolvedStrongWeight }}>Gemini 100% 粗体混排</strong>
+                  、
                   <code
                     className="rounded-[4px] bg-[var(--color-markdown-inline-code-bg,color-mix(in_srgb,var(--color-markdown-inline-code)_55%,transparent))] px-[0.35em] py-[0.08em] text-[0.9em] text-[var(--color-markdown-inline-code-fg,var(--color-foreground))]"
                     style={{
@@ -322,6 +365,36 @@ export function FontCustomizeCard() {
                 >
                   const pi = true; // 0O 1lI 等宽代码与路径预览
                 </div>
+              </div>
+            </div>
+
+            {/* Quick curated font pairing presets */}
+            <div className="space-y-2 border-t border-border px-4 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-ui-xs font-medium text-foreground-subtle">一键字体搭配</span>
+                <span className="text-ui-xs text-foreground-subtlest">
+                  按本机已安装字体自动择优命中
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {BUILTIN_FONT_PAIRING_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyFontPairingPreset(preset)}
+                    className="flex flex-col items-start gap-0.5 rounded-lg border border-border bg-surface/60 px-3 py-2 text-left transition-colors hover:border-border-hover hover:bg-hover"
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="text-ui-sm font-medium text-foreground">{preset.name}</span>
+                      <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[11px] font-medium leading-none text-brand">
+                        {preset.badge}
+                      </span>
+                    </div>
+                    <span className="text-ui-xs leading-snug text-foreground-subtle">
+                      {preset.description}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -393,6 +466,50 @@ export function FontCustomizeCard() {
                   onChange={(weight) => updateActiveFont({ weight })}
                 />
               </div>
+
+              {activeScope === "chat" ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-ui-sm font-medium text-foreground">正文粗体强调</span>
+                    <span className="font-mono text-ui-xs tabular-nums text-foreground-subtlest">
+                      当前生效 {resolvedStrongWeight}
+                    </span>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="正文粗体强调字重"
+                    className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface p-0.5"
+                  >
+                    {STRONG_WEIGHT_OPTIONS.map((option) => {
+                      const active = fonts.chat.strongWeight === option.value;
+                      return (
+                        <button
+                          key={String(option.value)}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() =>
+                            updateConfig((prev) => ({
+                              ...prev,
+                              fonts: {
+                                ...prev.fonts,
+                                chat: { ...prev.fonts.chat, strongWeight: option.value },
+                              },
+                            }))
+                          }
+                          className={cn(
+                            "h-6 truncate rounded-md px-1.5 text-ui-xs font-medium transition-colors",
+                            active
+                              ? "bg-card text-foreground shadow-xs"
+                              : "text-foreground-subtle hover:text-foreground",
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               {activeScope === "chat" ? (
                 <div className="grid grid-cols-1 gap-4 border-t border-border pt-3.5 sm:grid-cols-2">

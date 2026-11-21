@@ -1,14 +1,26 @@
 export type LocalFontLoadStatus = "idle" | "loading" | "ready" | "denied" | "unsupported";
 
+export interface LocalFontFaceMeta {
+  fullName: string;
+  postscriptName: string;
+  style: string;
+}
+
 export interface LocalFontEntry {
   family: string;
   isLikelyCjk: boolean;
   isLikelyMono: boolean;
+  faces?: readonly LocalFontFaceMeta[];
 }
 
 interface LocalFontDataLike {
   family: string;
+  fullName?: string;
+  postscriptName?: string;
+  style?: string;
 }
+
+const scannedFaceCache = new Map<string, LocalFontFaceMeta[]>();
 
 const CJK_FONT_NAME_HINTS = [
   "sarasa",
@@ -135,24 +147,63 @@ export async function querySystemLocalFonts(): Promise<{
 
   try {
     const rawFonts = await win.queryLocalFonts();
-    const families = new Set<string>();
+    const families = new Map<string, LocalFontFaceMeta[]>();
     for (const item of rawFonts) {
       const name = item?.family?.trim();
-      if (name) families.add(name);
+      if (!name) continue;
+      const list = families.get(name) ?? [];
+      const fullName = item.fullName?.trim() ?? "";
+      const postscriptName = item.postscriptName?.trim() ?? "";
+      const style = item.style?.trim() ?? "";
+      if (fullName || postscriptName) {
+        list.push({ fullName, postscriptName, style });
+      }
+      families.set(name, list);
     }
 
     if (families.size === 0) {
       return { status: "denied", fonts: buildFallbackEntries() };
     }
 
-    const entries = Array.from(families)
-      .map(classifyFont)
+    scannedFaceCache.clear();
+    for (const [family, faces] of families) {
+      if (faces.length > 0) {
+        scannedFaceCache.set(family.toLowerCase(), faces);
+      }
+    }
+
+    const entries = Array.from(families.entries())
+      .map(([family, faces]) => ({
+        ...classifyFont(family),
+        ...(faces.length > 0 ? { faces } : {}),
+      }))
       .sort((a, b) => a.family.localeCompare(b.family, "zh-Hans-CN"));
 
     return { status: "ready", fonts: entries };
   } catch {
     return { status: "denied", fonts: buildFallbackEntries() };
   }
+}
+
+/** 根据已扫描的本机字体列表按优先级选择首个可用候选；未扫描时返回首选候选。 */
+export function resolveFontCandidate(
+  candidates: readonly string[],
+  availableFamilies: readonly string[],
+): string {
+  if (candidates.length === 0) return "";
+  if (availableFamilies.length === 0) return candidates[0] ?? "";
+  const availableByLower = new Map<string, string>();
+  for (const family of availableFamilies) {
+    const key = family.trim().toLowerCase();
+    if (key && !availableByLower.has(key)) {
+      availableByLower.set(key, family.trim());
+    }
+  }
+  for (const candidate of candidates) {
+    const matched = availableByLower.get(candidate.trim().toLowerCase());
+    if (matched) return matched;
+  }
+  return candidates[0] ?? "";
 }
 
 /** 仅覆盖西文/数字/常用符号，显式排除 CJK 汉字与中文标点，确保西文字体绝不劫持中文字体。 */
@@ -184,16 +235,144 @@ export function buildCssFontStack(
   return parts.join(", ");
 }
 
+type DualScriptFaceSlot = "regular" | "medium" | "semibold" | "bold" | "italic" | "boldItalic";
+
+function matchesScannedFaceSlot(styleRaw: string, slot: DualScriptFaceSlot): boolean {
+  const s = styleRaw.trim().toLowerCase();
+  const isItalic = /\b(italic|oblique)\b/.test(s);
+  const isSemiBold = /\b(semibold|semi bold|semi-bold|demibold|demi bold|demi-bold)\b/.test(s);
+  const isBold = !isSemiBold && /\bbold\b/.test(s) && !/\b(extra|ultra|heavy|black)\b/.test(s);
+  const isMedium = /\bmedium\b/.test(s);
+  const isRegular =
+    s === "" ||
+    (/\b(regular|normal|book|roman|text)\b/.test(s) &&
+      !isItalic &&
+      !isSemiBold &&
+      !isBold &&
+      !isMedium &&
+      !/\b(light|thin|extra|ultra|heavy|black)\b/.test(s));
+
+  switch (slot) {
+    case "regular":
+      return isRegular;
+    case "medium":
+      return !isItalic && isMedium;
+    case "semibold":
+      return !isItalic && isSemiBold;
+    case "bold":
+      return !isItalic && isBold;
+    case "italic":
+      return isItalic && !isSemiBold && !isBold && !/\b(extra|ultra|heavy|black)\b/.test(s);
+    case "boldItalic":
+      return isItalic && (isBold || isSemiBold);
+  }
+}
+
+function buildLocalSrcCandidates(
+  family: string,
+  slot: DualScriptFaceSlot,
+  scannedFaces?: readonly LocalFontFaceMeta[],
+): string {
+  const compact = family.replace(/\s+/g, "");
+  const names: string[] = [];
+  const push = (name: string | undefined) => {
+    const trimmed = name?.trim();
+    if (trimmed && !names.includes(trimmed)) names.push(trimmed);
+  };
+
+  // 优先使用本机真实扫描到的 fullName / postscriptName，避免 Windows Chromium local() 命名猜测失配。
+  const faces = scannedFaces ?? scannedFaceCache.get(family.toLowerCase());
+  if (faces && faces.length > 0) {
+    for (const face of faces) {
+      if (matchesScannedFaceSlot(face.style, slot)) {
+        push(face.fullName);
+        push(face.postscriptName);
+      }
+    }
+  }
+
+  const pushRegularFallbacks = () => {
+    push(`${family} Regular`);
+    push(family);
+    push(`${family}-Regular`);
+    if (compact !== family) {
+      push(`${compact}-Regular`);
+      push(compact);
+    }
+  };
+
+  const pushSemiBoldCandidates = () => {
+    push(`${family} SemiBold`);
+    push(`${family} Semibold`);
+    push(`${family} DemiBold`);
+    push(`${family}-SemiBold`);
+    if (compact !== family) {
+      push(`${compact}-SemiBold`);
+      push(`${compact}-Semibold`);
+    }
+  };
+
+  const pushBoldCandidates = () => {
+    push(`${family} Bold`);
+    push(`${family}-Bold`);
+    if (compact !== family) {
+      push(`${compact}-Bold`);
+    }
+  };
+
+  switch (slot) {
+    case "regular":
+      pushRegularFallbacks();
+      break;
+    case "medium":
+      push(`${family} Medium`);
+      push(`${family}-Medium`);
+      if (compact !== family) push(`${compact}-Medium`);
+      pushRegularFallbacks();
+      break;
+    case "semibold":
+      pushSemiBoldCandidates();
+      pushBoldCandidates();
+      pushRegularFallbacks();
+      break;
+    case "bold":
+      pushBoldCandidates();
+      pushSemiBoldCandidates();
+      pushRegularFallbacks();
+      break;
+    case "italic":
+      push(`${family} Italic`);
+      push(`${family}-Italic`);
+      if (compact !== family) push(`${compact}-Italic`);
+      push(`${family} Oblique`);
+      pushRegularFallbacks();
+      break;
+    case "boldItalic":
+      push(`${family} Bold Italic`);
+      push(`${family}-BoldItalic`);
+      if (compact !== family) push(`${compact}-BoldItalic`);
+      push(`${family} SemiBold Italic`);
+      push(`${family}-SemiBoldItalic`);
+      pushBoldCandidates();
+      pushRegularFallbacks();
+      break;
+  }
+
+  return names.map((name) => `local("${escapeCssFontName(name)}")`).join(", ");
+}
+
 /**
  * 为「西文字体 + 中文字体」生成真正互不干扰的双语字体规则：
  * - 当同时指定了不同的西文字体与中文字体时，通过 `@font-face` + `unicode-range` 将西文字体严格限定在拉丁/数字/符号区间；
- * - 即使所选西文字体本身包含中文字形（如更纱、思源、微软雅黑等），汉字也会强制跳过它并命中中文字体。
+ * - 即使所选西文字体本身包含中文字形（如更纱、思源、微软雅黑等），汉字也会强制跳过它并命中中文字体；
+ * - 常规/中等/半粗/粗体分别补全 Regular/Medium/SemiBold/Bold 与 PostScript 名，避免常规体匹配失败退回中文字体而粗体命中西文字体。
  */
 export function buildDualScriptFontCss(
   aliasName: string,
   westernFamily: string,
   cjkFamily: string,
   fallbackStack: string,
+  scannedFaces?: readonly LocalFontFaceMeta[],
 ): { readonly fontFacesCss: string; readonly stack: string } {
   const westTrimmed = westernFamily.trim();
   const cjkTrimmed = cjkFamily.trim();
@@ -203,14 +382,22 @@ export function buildDualScriptFontCss(
       stack: buildCssFontStack(westTrimmed, cjkTrimmed, fallbackStack),
     };
   }
-  const escaped = escapeCssFontName(westTrimmed);
   const alias = `"${escapeCssFontName(aliasName)}"`;
-  const fontFacesCss = [
-    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped}");\n  font-weight: 100 599;\n  font-style: normal;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
-    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Bold"), local("${escaped}-Bold"), local("${escaped} SemiBold"), local("${escaped}");\n  font-weight: 600 900;\n  font-style: normal;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
-    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Italic"), local("${escaped}-Italic"), local("${escaped}");\n  font-weight: 100 599;\n  font-style: italic;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
-    `@font-face {\n  font-family: ${alias};\n  src: local("${escaped} Bold Italic"), local("${escaped}-BoldItalic"), local("${escaped} Bold"), local("${escaped}");\n  font-weight: 600 900;\n  font-style: italic;\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
-  ].join("\n");
+  const facesSpec: Array<{ slot: DualScriptFaceSlot; weight: string; style: "normal" | "italic" }> =
+    [
+      { slot: "regular", weight: "100 499", style: "normal" },
+      { slot: "medium", weight: "500 599", style: "normal" },
+      { slot: "semibold", weight: "600 650", style: "normal" },
+      { slot: "bold", weight: "651 900", style: "normal" },
+      { slot: "italic", weight: "100 599", style: "italic" },
+      { slot: "boldItalic", weight: "600 900", style: "italic" },
+    ];
+  const fontFacesCss = facesSpec
+    .map(
+      ({ slot, weight, style }) =>
+        `@font-face {\n  font-family: ${alias};\n  src: ${buildLocalSrcCandidates(westTrimmed, slot, scannedFaces)};\n  font-weight: ${weight};\n  font-style: ${style};\n  unicode-range: ${WESTERN_UNICODE_RANGE};\n}`,
+    )
+    .join("\n");
   const stack = [alias, quoteCssFontFamily(cjkTrimmed), fallbackStack].filter(Boolean).join(", ");
   return { fontFacesCss, stack };
 }

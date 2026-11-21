@@ -6,6 +6,7 @@ import {
   DEFAULT_LIGHT_COLORS,
 } from "./presets.js";
 import type {
+  ChatStrongWeight,
   CustomAppearanceConfig,
   CustomBaseMode,
   CustomThemeColorOverrides,
@@ -32,6 +33,11 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 function readNumber(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function readChatStrongWeight(value: unknown, fallback: ChatStrongWeight): ChatStrongWeight {
+  if (value === "auto" || value === 600 || value === 700) return value;
+  return fallback;
 }
 
 function normalizeColors(
@@ -125,6 +131,7 @@ export function normalizeCustomAppearanceConfig(raw: unknown): CustomAppearanceC
         westernFamily: readString(rawChatFont.westernFamily, def.fonts.chat.westernFamily),
         cjkFamily: readString(rawChatFont.cjkFamily, def.fonts.chat.cjkFamily),
         weight: readNumber(rawChatFont.weight, def.fonts.chat.weight, 300, 800),
+        strongWeight: readChatStrongWeight(rawChatFont.strongWeight, def.fonts.chat.strongWeight),
         fontSizePx: readNumber(rawChatFont.fontSizePx, def.fonts.chat.fontSizePx, 12, 22),
         lineHeight: readNumber(rawChatFont.lineHeight, def.fonts.chat.lineHeight, 1.3, 2.2),
       },

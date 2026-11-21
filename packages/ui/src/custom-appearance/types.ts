@@ -28,6 +28,8 @@ export interface CustomWallpaperConfig {
   surfaceOpacity: number;
 }
 
+export type ChatStrongWeight = "auto" | 600 | 700;
+
 export interface FontPairConfig {
   westernFamily: string;
   cjkFamily: string;
@@ -38,10 +40,36 @@ export interface CustomFontsConfig {
   enabled: boolean;
   ui: FontPairConfig;
   chat: FontPairConfig & {
+    strongWeight: ChatStrongWeight;
     fontSizePx: number;
     lineHeight: number;
   };
   mono: FontPairConfig;
+}
+
+export interface FontPairingPreset {
+  id: string;
+  name: string;
+  badge: string;
+  description: string;
+  ui: {
+    westernCandidates: string[];
+    cjkCandidates: string[];
+    weight: number;
+  };
+  chat: {
+    westernCandidates: string[];
+    cjkCandidates: string[];
+    weight: number;
+    strongWeight: ChatStrongWeight;
+    fontSizePx: number;
+    lineHeight: number;
+  };
+  mono: {
+    westernCandidates: string[];
+    cjkCandidates: string[];
+    weight: number;
+  };
 }
 
 export interface CustomLayoutConfig {

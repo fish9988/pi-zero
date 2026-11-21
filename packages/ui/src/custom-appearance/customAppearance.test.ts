@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach } from "vitest";
-import { buildCssFontStack, buildDualScriptFontCss, WESTERN_UNICODE_RANGE } from "./fontLoader.js";
-import { BUILTIN_APPEARANCE_PRESETS, DEFAULT_CUSTOM_APPEARANCE_CONFIG } from "./presets.js";
+import {
+  buildCssFontStack,
+  buildDualScriptFontCss,
+  resolveFontCandidate,
+  WESTERN_UNICODE_RANGE,
+} from "./fontLoader.js";
+import {
+  BUILTIN_APPEARANCE_PRESETS,
+  BUILTIN_FONT_PAIRING_PRESETS,
+  DEFAULT_CUSTOM_APPEARANCE_CONFIG,
+} from "./presets.js";
 import { CHAT_WIDTH_MAX_PX, CHAT_WIDTH_MIN_PX, normalizeCustomAppearanceConfig } from "./store.js";
-import { applyCustomAppearanceToDocument } from "./styleEngine.js";
+import { applyCustomAppearanceToDocument, resolveChatStrongWeight } from "./styleEngine.js";
 
 describe("custom-appearance", () => {
   beforeEach(() => {
@@ -45,9 +54,67 @@ describe("custom-appearance", () => {
       "sans-serif",
     );
     expect(dual.fontFacesCss).toContain('font-family: "__pizero_chat_west"');
+    expect(dual.fontFacesCss).toContain('local("Microsoft YaHei Regular")');
     expect(dual.fontFacesCss).toContain('local("Microsoft YaHei")');
+    expect(dual.fontFacesCss).toContain('local("MicrosoftYaHei-Regular")');
+    expect(dual.fontFacesCss).toContain("font-weight: 600 650;");
+    expect(dual.fontFacesCss).toContain("font-weight: 651 900;");
     expect(dual.fontFacesCss).toContain(`unicode-range: ${WESTERN_UNICODE_RANGE}`);
     expect(dual.stack).toBe('"__pizero_chat_west", "LXGW WenKai", sans-serif');
+
+    // 提供真实扫描到的本地字型时，优先写入精确 fullName/postscriptName
+    const dualWithScanned = buildDualScriptFontCss(
+      "__pizero_chat_west",
+      "Anthropic Serif",
+      "Noto Serif SC",
+      "serif",
+      [
+        {
+          fullName: "Anthropic Serif Regular",
+          postscriptName: "AnthropicSerif-Regular",
+          style: "Regular",
+        },
+        {
+          fullName: "Anthropic Serif Bold",
+          postscriptName: "AnthropicSerif-Bold",
+          style: "Bold",
+        },
+      ],
+    );
+    expect(dualWithScanned.fontFacesCss).toContain('local("AnthropicSerif-Regular")');
+    expect(dualWithScanned.fontFacesCss).toContain('local("AnthropicSerif-Bold")');
+  });
+
+  it("resolves chat strong weights, font pairing candidates, and curated font presets", () => {
+    expect(resolveChatStrongWeight(400, "auto")).toBe(600);
+    expect(resolveChatStrongWeight(500, "auto")).toBe(700);
+    expect(resolveChatStrongWeight(600, "auto")).toBe(700);
+    expect(resolveChatStrongWeight(400, 600)).toBe(600);
+    expect(resolveChatStrongWeight(400, 700)).toBe(700);
+
+    expect(resolveFontCandidate(["Anthropic Serif", "Georgia"], ["Georgia", "Noto Serif SC"])).toBe(
+      "Georgia",
+    );
+    expect(resolveFontCandidate(["Sarasa UI SC", "Microsoft YaHei UI"], [])).toBe("Sarasa UI SC");
+
+    const presetIds = BUILTIN_FONT_PAIRING_PRESETS.map((p) => p.id);
+    expect(presetIds).toContain("sarasa-clean");
+    expect(presetIds).toContain("editorial-serif");
+    expect(presetIds).toContain("harmony-modern");
+    expect(presetIds).toContain("system-default");
+
+    const normalizedLegacy = normalizeCustomAppearanceConfig({
+      fonts: { enabled: true, chat: { weight: 400 } },
+    });
+    expect(normalizedLegacy.fonts.chat.strongWeight).toBe("auto");
+
+    const normalizedExplicit = normalizeCustomAppearanceConfig({
+      fonts: { enabled: true, chat: { weight: 400, strongWeight: 600 } },
+    });
+    applyCustomAppearanceToDocument(normalizedExplicit, "light", false);
+    const css = document.getElementById("zcode-custom-appearance-vars")?.textContent ?? "";
+    expect(css).toContain("--zcode-chat-strong-weight: 600;");
+    expect(css).toContain("font-weight: 600;");
   });
 
   it("injects theme markdown hierarchy variables, scoped dual-script fonts, chat width and respects safe mode", () => {

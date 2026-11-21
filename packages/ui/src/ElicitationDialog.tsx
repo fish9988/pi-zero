@@ -780,14 +780,14 @@ function ElicitationDialogContent({
         onFocus={() => setActiveOptionIndex(index)}
         onKeyDown={handleOptionKeyDown}
         className={cn(
-          "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors focus-visible:bg-hover",
+          "flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors focus-visible:bg-hover",
           isSelected ? "bg-selected" : isActive ? "bg-hover" : "hover:bg-hover",
         )}
       >
         {question.multiSelect ? (
           <span
             className={cn(
-              "flex size-4 shrink-0 items-center justify-center rounded-sm border",
+              "mt-1 flex size-4 shrink-0 items-center justify-center rounded-sm border",
               isSelected
                 ? "border-brand bg-brand text-foreground-inverse"
                 : "border-border text-transparent",
@@ -798,7 +798,7 @@ function ElicitationDialogContent({
         ) : (
           <span
             className={cn(
-              "mt-0.5 w-5 shrink-0 self-start text-ui-base font-medium leading-normal",
+              "w-5 shrink-0 text-ui-base font-medium leading-normal tabular-nums",
               isSelected ? "text-foreground" : "text-foreground-subtlest",
             )}
           >
@@ -854,7 +854,7 @@ function ElicitationDialogContent({
           <span
             className={cn(
               // 与 textarea 首行使用相同行高并让出 1px 边框，避免顶部或整体居中造成错位。
-              "mt-px w-5 shrink-0 self-start text-ui-base font-medium leading-normal md:leading-relaxed",
+              "mt-px w-5 shrink-0 self-start text-ui-base font-medium leading-normal tabular-nums",
               isSelected ? "text-foreground" : "text-foreground-subtlest",
             )}
           >
@@ -982,7 +982,17 @@ function ElicitationDialogContent({
     ) : null;
 
   return (
-    <div className="w-full shrink-0">
+    <div className="relative w-full shrink-0 pt-3">
+      {/* 顶部柔和背景遮罩 + 卡片背后护底，避免 sticky bottom dock 下滚动消息/用户气泡从上缘与圆角缝隙透出。 */}
+      <div
+        aria-hidden="true"
+        data-elicitation-top-mask="true"
+        className="pointer-events-none absolute -top-4 inset-x-0 h-10 bg-gradient-to-t from-background via-background/95 to-transparent"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-6 bottom-0 bg-background"
+      />
       {/* Bugfix: 手机远控视口较短，长问题和多选项会把按钮顶出弹窗；卡片限高后让内容区内部滚动。 */}
       <div
         ref={cardRef}
@@ -1006,9 +1016,9 @@ function ElicitationDialogContent({
                   <Badge
                     variant="outline"
                     title={normalizedTitleHeader}
-                    className="mr-2 inline-block max-w-44 align-middle text-left text-ui-sm truncate"
+                    className="mr-2 inline-flex h-auto min-h-6 max-w-44 items-center align-middle px-2.5 py-0.5 text-left text-ui-xs leading-snug"
                   >
-                    {normalizedTitleHeader}
+                    <span className="truncate">{normalizedTitleHeader}</span>
                   </Badge>
                 ) : null}
                 {/* Bugfix: 问题不能只放在会截断的标题行；移动端没有 hover，必须在 tag 后直接完整可读。 */}
@@ -1138,9 +1148,9 @@ function ElicitationDialogContent({
                   <Badge
                     variant="outline"
                     title={normalizedTitleHeader}
-                    className="inline-block max-w-32 shrink-0 align-middle text-left text-ui-sm truncate"
+                    className="inline-flex h-auto min-h-5 max-w-32 shrink-0 items-center align-middle px-2 py-0.5 text-left text-ui-xs leading-snug"
                   >
-                    {normalizedTitleHeader}
+                    <span className="truncate">{normalizedTitleHeader}</span>
                   </Badge>
                 ) : null}
                 <span className="min-w-0 flex-1 truncate">{titleQuestion}</span>

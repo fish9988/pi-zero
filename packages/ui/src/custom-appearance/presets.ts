@@ -2,6 +2,7 @@ import type {
   AppearancePreset,
   CustomAppearanceConfig,
   CustomThemeColorOverrides,
+  FontPairingPreset,
 } from "./types.js";
 
 export const DEFAULT_LIGHT_COLORS: CustomThemeColorOverrides = {
@@ -65,6 +66,7 @@ export const DEFAULT_CUSTOM_APPEARANCE_CONFIG: CustomAppearanceConfig = {
       westernFamily: "",
       cjkFamily: "",
       weight: 400,
+      strongWeight: "auto",
       fontSizePx: 14,
       lineHeight: 1.65,
     },
@@ -413,6 +415,125 @@ export const BUILTIN_APPEARANCE_PRESETS: AppearancePreset[] = [
         markdownCodeBg: "#282c36",
         markdownQuote: "#9aa1b0",
       },
+    },
+  },
+];
+
+export const BUILTIN_FONT_PAIRING_PRESETS: FontPairingPreset[] = [
+  {
+    id: "sarasa-clean",
+    name: "清晰无衬线 · 更纱",
+    badge: "全字重推荐",
+    description: "中英同源等高、真粗斜体，高分屏代码与中文混排最统一不割裂。",
+    ui: {
+      westernCandidates: [],
+      cjkCandidates: [
+        "Sarasa UI SC",
+        "Sarasa Gothic SC",
+        "HarmonyOS Sans SC",
+        "Microsoft YaHei UI",
+      ],
+      weight: 400,
+    },
+    chat: {
+      westernCandidates: [],
+      cjkCandidates: [
+        "Sarasa UI SC",
+        "Sarasa Gothic SC",
+        "HarmonyOS Sans SC",
+        "Microsoft YaHei UI",
+      ],
+      weight: 400,
+      strongWeight: 600,
+      fontSizePx: 15,
+      lineHeight: 1.68,
+    },
+    mono: {
+      westernCandidates: ["Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Sarasa Term SC"],
+      cjkCandidates: ["Sarasa Term SC", "Sarasa UI SC", "Microsoft YaHei UI"],
+      weight: 400,
+    },
+  },
+  {
+    id: "editorial-serif",
+    name: "书卷衬线 · 思源宋体",
+    badge: "Claude 质感",
+    description: "西文与中文均为多字重衬线体，保留书卷阅读质感且粗体自然协调。",
+    ui: {
+      westernCandidates: ["Anthropic Sans", "Segoe UI", "Inter"],
+      cjkCandidates: ["Sarasa UI SC", "HarmonyOS Sans SC", "Microsoft YaHei UI"],
+      weight: 400,
+    },
+    chat: {
+      westernCandidates: ["Anthropic Serif", "Georgia", "Cambria", "Times New Roman"],
+      cjkCandidates: ["Noto Serif SC", "Source Han Serif SC", "Songti SC"],
+      weight: 400,
+      strongWeight: 600,
+      fontSizePx: 15,
+      lineHeight: 1.75,
+    },
+    mono: {
+      westernCandidates: ["Anthropic Mono", "Cascadia Mono", "JetBrains Mono"],
+      cjkCandidates: ["Sarasa Term SC", "Sarasa UI SC", "Microsoft YaHei UI"],
+      weight: 400,
+    },
+  },
+  {
+    id: "harmony-modern",
+    name: "鸿蒙 / 思源现代",
+    badge: "温润耐看",
+    description: "现代圆润无衬线，中英笔画灰度均衡，长时间阅读轻松省眼。",
+    ui: {
+      westernCandidates: ["Segoe UI", "Inter"],
+      cjkCandidates: [
+        "HarmonyOS Sans SC",
+        "Noto Sans SC",
+        "Source Han Sans SC",
+        "Microsoft YaHei UI",
+      ],
+      weight: 400,
+    },
+    chat: {
+      westernCandidates: ["Segoe UI", "Inter"],
+      cjkCandidates: [
+        "HarmonyOS Sans SC",
+        "Noto Sans SC",
+        "Source Han Sans SC",
+        "Microsoft YaHei UI",
+      ],
+      weight: 400,
+      strongWeight: 600,
+      fontSizePx: 15,
+      lineHeight: 1.68,
+    },
+    mono: {
+      westernCandidates: ["Cascadia Mono", "JetBrains Mono", "Consolas"],
+      cjkCandidates: ["HarmonyOS Sans SC", "Microsoft YaHei UI"],
+      weight: 400,
+    },
+  },
+  {
+    id: "system-default",
+    name: "系统原生默认",
+    badge: "还原默认",
+    description: "清空自定义字族并回到系统默认排版与自适应半粗强调。",
+    ui: {
+      westernCandidates: [],
+      cjkCandidates: [],
+      weight: 400,
+    },
+    chat: {
+      westernCandidates: [],
+      cjkCandidates: [],
+      weight: 400,
+      strongWeight: "auto",
+      fontSizePx: 14,
+      lineHeight: 1.65,
+    },
+    mono: {
+      westernCandidates: [],
+      cjkCandidates: [],
+      weight: 400,
     },
   },
 ];
