@@ -2180,7 +2180,7 @@ export const MessageResponse = memo(
             return (
               <code
                 className={cn(
-                  "rounded-[4px] bg-[var(--color-markdown-inline-code-bg,color-mix(in_srgb,var(--color-markdown-inline-code)_55%,transparent))] px-[0.35em] py-[0.08em] font-mono text-[0.9em] leading-snug text-[var(--color-markdown-inline-code-fg,var(--color-foreground))] [box-decoration-break:clone]",
+                  "rounded-[5px] bg-[var(--color-markdown-inline-code-bg,color-mix(in_srgb,var(--color-markdown-inline-code)_55%,transparent))] mx-0.5 px-[0.38em] py-[0.06em] font-mono text-[0.96em] leading-snug text-[var(--color-markdown-inline-code-fg,var(--color-foreground))] [box-decoration-break:clone]",
                   codeClassName,
                 )}
                 {...codeProps}

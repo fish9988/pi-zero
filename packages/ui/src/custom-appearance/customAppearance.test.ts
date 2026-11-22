@@ -166,7 +166,7 @@ describe("custom-appearance", () => {
     expect(cssText).toContain("--color-markdown-inline-code-bg: #f3eee8;");
     expect(cssText).toContain("--color-markdown-quote: #6b665d;");
     expect(cssText).toContain('[data-conversation-selectable="true"] :not(pre) > code');
-    expect(cssText).toContain("font-size: 0.9em;");
+    expect(cssText).toContain("font-size: 0.96em;");
     expect(cssText).toContain('local("Inter")');
     expect(cssText).toContain('"__pizero_ui_west", "Sarasa UI SC"');
     expect(cssText).toContain('local("Georgia")');

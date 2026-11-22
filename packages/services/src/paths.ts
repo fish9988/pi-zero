@@ -11,6 +11,7 @@ import {
 
 let _dataBaseDir: string | null = null;
 export const ZCODE_WINDOWS_APP_INSTALL_DIR_ENV = "ZCODE_WINDOWS_APP_INSTALL_DIR";
+export const PI_ZERO_DATA_DIR_NAME = ".pi-zero";
 const envDataBaseDir = process.env.ZCODE_DATA_BASE_DIR?.trim() || null;
 const defaultDataBaseDir = process.env.HOME?.trim() || homedir();
 
@@ -42,17 +43,17 @@ export function getDataBaseDir(): string {
   return defaultDataBaseDir;
 }
 
-/** {dataBaseDir}/.zcode */
+/** {dataBaseDir}/.pi-zero */
 export function getZCodeDataRootDir(): string {
-  return join(getDataBaseDir(), ".zcode");
+  return join(getDataBaseDir(), PI_ZERO_DATA_DIR_NAME);
 }
 
-/** 非项目对话共享的真实工作目录；默认 ~/.zcode/workspace/default。 */
+/** 非项目对话共享的真实工作目录；默认 ~/.pi-zero/workspace/default。 */
 export function getConversationWorkspaceDir(): string {
   return join(getZCodeDataRootDir(), "workspace", "default");
 }
 
-/** {dataBaseDir}/.zcode/v2 */
+/** {dataBaseDir}/.pi-zero/v2 */
 export function getAppConfigDir(): string {
   return join(getZCodeDataRootDir(), "v2");
 }
@@ -69,9 +70,9 @@ export function resolveAgentUserInstructionsHomeDir(env: NodeJS.ProcessEnv = pro
   return envHome && envHome.length > 0 ? envHome : homedir();
 }
 
-/** `{home}/.zcode/AGENTS.md`：用户自定义指令（个性化）的唯一事实源文件。 */
+/** `{home}/.pi-zero/AGENTS.md`：用户自定义指令（个性化）的唯一事实源文件。 */
 export function getAgentUserInstructionsFilePath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveAgentUserInstructionsHomeDir(env), ".zcode", "AGENTS.md");
+  return join(resolveAgentUserInstructionsHomeDir(env), PI_ZERO_DATA_DIR_NAME, "AGENTS.md");
 }
 
 function readEnvValue(env: Record<string, string | undefined>, key: string): string | undefined {
@@ -137,6 +138,10 @@ function collectWindowsForbiddenAppInstallDirs(
     programFilesX86 ? win32.join(programFilesX86, "ZCode") : null,
     programW6432 ? win32.join(programW6432, "ZCode") : null,
     localAppData ? win32.join(localAppData, "Programs", "ZCode") : null,
+    programFiles ? win32.join(programFiles, "Pi Zero") : null,
+    programFilesX86 ? win32.join(programFilesX86, "Pi Zero") : null,
+    programW6432 ? win32.join(programW6432, "Pi Zero") : null,
+    localAppData ? win32.join(localAppData, "Programs", "Pi Zero") : null,
   ];
   const seen = new Set<string>();
   const result: string[] = [];
@@ -251,7 +256,7 @@ export function getLegacyDeletedTaskSessionSnapshotPath(
 export function getProviderWorkspaceConfigDir(): string {
   return ZCODE_AGENT_RUNTIME.nativeConfigDir
     ? join(getDataBaseDir(), ZCODE_AGENT_RUNTIME.nativeConfigDir)
-    : join(getDataBaseDir(), ".zcode", "cli");
+    : join(getDataBaseDir(), PI_ZERO_DATA_DIR_NAME, "cli");
 }
 
 /**
@@ -260,8 +265,8 @@ export function getProviderWorkspaceConfigDir(): string {
  * state must only live at the default homedir location.
  */
 export async function copyDataDirectory(oldBaseDir: string, newBaseDir: string): Promise<void> {
-  const oldDir = join(oldBaseDir, ".zcode", "v2");
-  const newDir = join(newBaseDir, ".zcode", "v2");
+  const oldDir = join(oldBaseDir, PI_ZERO_DATA_DIR_NAME, "v2");
+  const newDir = join(newBaseDir, PI_ZERO_DATA_DIR_NAME, "v2");
   await cp(oldDir, newDir, {
     recursive: true,
     force: false,

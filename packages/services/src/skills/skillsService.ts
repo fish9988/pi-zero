@@ -38,7 +38,7 @@ interface ParsedFrontmatter {
 }
 
 const SKILL_META_FILE_NAME = "_meta.json";
-const SKILL_SETTINGS_DIR = join(resolveUserHomeDir(), ".zcode", "v2");
+const SKILL_SETTINGS_DIR = join(resolveUserHomeDir(), ".pi-zero", "v2");
 const SKILL_CLI_SETTINGS_DIR = join(resolveUserHomeDir(), ".zcode", "cli");
 const SKILL_CLI_CONFIG_FILE = join(SKILL_CLI_SETTINGS_DIR, "config.json");
 const GIT_MARKER = ".git";

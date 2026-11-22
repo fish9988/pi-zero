@@ -353,7 +353,7 @@ export function spawnHostProcess(
       // 目标布局推导，密钥不离开 Main，也不开放对目标目录的加解密。
       const share = isAbsolute(targetBaseDir)
         ? credentialCipher.shareKeyWithCopiedCredentials(
-            join(targetBaseDir, ".zcode", "v2", "credentials.json"),
+            join(targetBaseDir, ".pi-zero", "v2", "credentials.json"),
           )
         : Promise.reject(new Error("Data root must be absolute"));
       void share

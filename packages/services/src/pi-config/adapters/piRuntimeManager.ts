@@ -44,7 +44,7 @@ export function resolveDefaultManagedRuntimeDir(
     return path.join(localAppData, "zcode-pi-runtime");
   }
   const home = env["HOME"]?.trim() || os.homedir();
-  return path.join(home, ".zcode", "pi-runtime");
+  return path.join(home, ".pi-zero", "pi-runtime");
 }
 
 /** 检测本机/受管 Pi CLI 状态；`checkHealth` 为 true 时额外执行一次真实 RPC 握手探针。 */

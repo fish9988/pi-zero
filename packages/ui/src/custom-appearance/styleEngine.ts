@@ -239,7 +239,7 @@ function buildAppearanceCss(config: CustomAppearanceConfig, resolvedMode: Custom
     }
 
     blocks.push(
-      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${resolvedStrongWeight};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  font-size: 0.9em;\n}`,
+      `[data-conversation-selectable="true"],\n[data-conversation-selectable="true"] p,\n[data-conversation-selectable="true"] li,\n[data-conversation-selectable="true"] blockquote,\n[data-conversation-selectable="true"] td,\n[data-conversation-selectable="true"] th,\n[data-v4-user-input-bubble="true"],\n[data-testid="v4-composer-input"],\n[data-testid="v4-composer-input"] [contenteditable="true"] {\n  ${chatProps.join("\n  ")}\n}\n[data-conversation-selectable="true"] :is(strong, b, h1, h2, h3, h4, h5, h6) {\n  font-weight: ${resolvedStrongWeight};\n}\n[data-conversation-selectable="true"] :is(code, pre, kbd, samp) {\n  font-family: var(--font-mono);\n}\n[data-conversation-selectable="true"] :not(pre) > code {\n  font-size: 0.96em;\n}`,
     );
   }
 
